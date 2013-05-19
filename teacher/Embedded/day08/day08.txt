@@ -1,0 +1,202 @@
+IO控制设备操作
+    大多数驱动除了需要具备读写设备的能力外，还需要具备对硬件控制的能力。比如：要求设备报告错误信息，改变波特率，这些操作通常通过ioctl()方法来实现。
+    int (*ioctl)(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg);
+    1. 设备控制命令
+	在内核源代码include/linux/ioctl.h中定义
+	1.1 cmd命令码构成
+	    31	   24 23	16 15 14	13	0
+	    设备类型  序列号		 方向	数据尺寸
+	1.2 设备类型
+	    在内核源代码Documentation/ioctl/ioctl-number.txt文件
+	    幻数(类型):这是表明哪个设备的命令，参考上述txt文件之后选择。8位宽
+	1.3 序列号
+	    控制命令字。8位宽
+	1.4 方向
+	    2位宽。代表数据传送方向。数据传送方向是从应用程序角度来看待。
+	    _IOC_NONE	代表无数据传送
+	    _IOC_READ	从驱动读数据
+	    _IOC_WRITE	写数据到驱动
+	1.5 数据尺寸
+	   数据大小。这个值与体系结构相关，通常是13或14位宽。
+    2. 定义ioctl命令码操作宏
+	_IO(type, nr)	定义一个务参数的命令
+	_IOR(type, nr, size)	定义一个从驱动读数据的命令
+	_IOW(type, nr, size)	定义一个写数据到驱动的命令
+	_IOWR(type, nr, size)	定义一个双向传递数据的命令，顺序是先写后读
+    3. 从命令码提取成员宏
+	_IOC_TYPE(cmd)	提取数据类型
+	_IOC_NR(cmd)	提取序列号
+	_IOC_DIR(cmd)	提取数据方向
+	_IOC_SIZE(cmd)	提取数据尺寸
+    4. 在内核空间和用户空间传递数据
+	copy_from_user
+	copy_to_user
+	get_user
+	put_user
+    5. access_ok函数
+	在内核源代码arch/arm/include/asm/uaccess.h中定义
+	用于判断用户空间内存是否可访问。
+	int access_ok(int type, const void *addr, unsigned long size);	
+	    type: 取值通常为VERIFY_READ或VERIFY_WRITE，用来表明是读用户内存还是写用户内存
+	    addr:待验证的用户内存地址
+	    size:待验证的用户内存长度
+	    返回值：返回1代表成功，0代表失败(用户内存存取有问题)。
+	如果access_ok失败，ioctl操作应该立即返回-EFAULT。
+
+
+并发与竞态
+    1.定义
+	1.1 并发
+	    多个执行单元同时发生
+	1.2 竞态
+	    并发的执行单元对共享资源(硬件资源或软件上的全局变量)的访问导致的竞争状态
+    2. 主要发生情况
+	2.1 对称多处理器(SMP)的多个CPU之间
+	   由于它们使用共同的系统总线，所以访问共同的外设和存储
+	2.2 单CPU内核抢占它的进程
+	   由于内核支持抢占调度，如果一个进程在内核执行的时候可能被另一个更高优先级进程打断，进程与抢占它的进程访问共享资源的情况类似于SMP的多个CPU
+	2.3 中断(硬中断、软中断、Tasklet、Bottom Half)与进程之间
+	    2.3.1 中断可以打断正在执行的进程，如果中断处理程序访问进程正在访问的资源，则竞态也会发生
+	    2.3.2 中断本身也可能被新的更高优先级的中断打断，因此，多个中断之间本身也可能引起并发而导致竞态。
+    3. 解决办法
+	解决竞态问题的途径是保证对共享资源的互斥访问，所谓互斥访问市指一个执行单元在访问资源的时候，其它的执行单元被禁止访问。
+	访问共享资源的代码区域称为临界区(Critical Section)，临界区需要以某种互斥机制加以保护。
+	在Linux系统中，中断屏蔽、原子操作、自旋锁和信号量是设备驱动程序中可以采用的互斥机制。
+
+
+中断屏蔽
+    这是在单CPU情况下避免竞态的一个简单方法，在进入临界区之前屏蔽中断，退出临界区之前恢复中断。
+    一般情况下，CPU都具备屏蔽中断和打开中断的功能。这项功能可以保证正在执行的内核路径不被中断程序抢占，可以防止某些竞争条件的发生。
+    屏蔽中断之后，中断与进程之间的并发不再发生；由于Linux内核的进程调度等操作都依赖于中断来实现，内核抢占进程之间的并发不再发生。
+    1. 中断控制操作
+	在内核源代码include/linux/irqflags.h中定义
+	local_irq_enable()
+	local_irq_disable()
+	local_irq_save()
+	local_irq_restore()
+    2. 一般使用方法
+	local_irq_disable()
+	...
+	critical section
+	...
+	local_irq_enable()
+    由于系统的异步I/O、进程调度等很多重要的系统操作都依赖于中断，所以，中断对于内核运行至关重要，在屏蔽中断期间所有的中断都无法得到处理。
+    因此，长时间屏蔽中断是危险的，有可能造成数据丢失，甚至系统崩溃。
+    所以，要求屏蔽中断之后，当前的内核代码执行路径应当尽快执行完临界区的代码。
+
+
+
+原子操作
+    1. 定义
+	原子操作指的是在执行路径中不会被别的代码中断的操作。
+	在Linux内核中提供两类原子操作：位原子操作和整型原子操作
+	原子操作依赖底层CPU的原子操作来实现，所有这些函数都与CPU架构密切相关。
+    2. 位原子操作
+	在内核源代码arch/arm/include/asm/bitops.h中定义
+	2.1 设置位
+	    set_bit(nr, void *addr);
+	    将addr地址内数据的第nr位设置为1
+	2.2 清除位
+	    clear_bit(nr, void *addr);
+	    将addr地址内数据的第nr位设置为0
+	2.3 改变位
+	    change_bit(nr, void *addr);
+	    将addr地址内数据的第nr位反置
+	2.4 测试位
+	    int test_bit(nr, void *addr);
+	    获取addr地址内数据的第nr位的值
+	2.5 测试并操作
+	    int test_and_set_bit(nr, void *addr);
+	    int test_and_clear_bit(nr, void *addr);
+	    int test_and_change_bit(nr, void *addr);
+    3. 整型原子操作
+	在内核源代码arch/arm/include/asm/atomic.h中定义
+	3.1 整形原子变量的定义
+	    typedef struct {
+		volatile int counter;
+	    } atomic_t;
+	3.2 整型原子变量操作
+	    3.2.1 设置原子变量的值
+		atomic_set(atomic_t *v, int i); // 设置原子变量v的值为i
+		atomic_t v=ATOMIC_INIT(i); // 定义一个原子变量v并初始化为i
+	    3.2.2 获取原子变量的值
+		atomic_read(atomic *v); //返回变量的值
+	    3.2.3 原子变量加/减操作
+		atomic_add(int i, atomic_t *v); // 原子变量的值增加i
+		atomic_sub(int i, atomic_t *v); // 原子变量的值减少i
+	    3.2.4 原子变量自增/自减
+		atomic_inc(atomic_t *v); //原子变量的值增加1
+		atomic_dec(atomic_t *v); //原子变量的值减少1
+	    3.2.5 测试并操作
+		atomic_inc_and_test(atomic_t *v);
+		atomic_dec_and_test(atomic_t *v);
+		atomic_sub_and_test(int i, atomic_t *v);
+		这些操作对原子变量执行自增、自减或减操作(没有加操作)后测试其是否为0。如果为0返回真，否则返回假。
+	    3.2.6 操作并返回
+		int atomic_add_return(int i, atomic_t *v);
+		int atomic_sub_return(int i, atomic_t *v);
+		int atomic_inc_return(atomic_t *v);
+		int atomic_dec_return(atomic_t *v);
+		这些操作对原子变量执行加、减、自增或自减操作，并返回操作后的新值。
+
+
+自旋锁
+    自旋锁最多只能有一个执行单元持有。
+    自旋锁不会引起进程睡眠，如果一个执行进程试图获取一个已经被持有的自旋锁，那么进程就会一直进行忙循环，一直等待下去，在这里看是否该自旋锁的持有者已经释放了锁，“自旋”近似于在“原地转圈”的意思。
+    1. 数据定义
+	在内核源代码include/linux/spinlock_types.h中定义
+	typedef struct {
+	    raw_spinlock_t raw_lock;
+	    ...
+	} spinlock_t;
+	typedef struct {
+	    volatile unsigned int lock;
+	} raw_spinlock_t;
+    2. 自旋锁操作
+	在内核源代码include/linux/spinlock.h中定义
+	2.1 定义自旋锁
+	    spinlock_t lock;
+	2.2 初始化自旋锁
+	    spin_lock_init(spinlock_t *lock);
+	    动态初始化自旋锁
+	    自旋锁在使用前必须初始化
+	2.3 获取自旋锁
+	    spin_lock(spinlock_t *lock);
+	    获取自旋锁，如果成功，立即获得锁，并马上返回；如果失败，它将一直自旋在那里，直到该自旋锁的持有者释放该锁。
+	    spin_trylock(spinlock_t *lock);
+	    试图获取自旋锁，如果能获得锁，则获得锁并立即返回真；否则立即返回假。
+	2.4 释放自旋锁
+	    spin_unlock(spinlock_t *lock);
+	    释放自旋锁，它必须和spin_lock()或spin_trylock()成对使用。
+	2.5 一般使用方法
+	    spinlock_t lock; // 定义一个自旋锁
+	    spin_lock_init(&lock); // 初始化自旋锁
+	    ...
+	    spin_lock(&lock); // 获取自旋锁
+	    ...
+	    critical section
+	    ...
+	    spin_unlock(&lock); // 释放自旋锁
+    3. 自旋锁应用环境
+	主要用在SMP或单CPU但内核可抢占的情况。
+    4. 衍生自旋锁
+	虽然自旋锁可以保证临界区不受别的CPU或者本CPU的抢占进程打扰，但是，还会受中断和中断底半部的影响。所以，产生如下衍生：
+	spin_lock_irq(); // local_irq_disable + spin_lock
+	spin_unlock_irq(); // spin_unlock + local_irq_enable
+	spin_lock_irqsave(); //local_irq_save + spin_lock
+	spin_unlock_irqsave(); //spin_unlock + local_irq_restore
+	spin_lock_bh(); // local_bh_disable + spin_lock
+	spin_unlock_bh(); // spin_unlock + local_bh_enable
+    5. 自旋锁使用注意事项
+	5.1 只有在占用锁地时间极短的情况下使用。由于获取锁是一直等待，所以临界区较大或有共享设备的时候，使用自旋锁会降低系统性能。
+	5.2 自旋锁可能导致死锁
+	    a). 递归调用，也就是已经持有自旋锁的CPU想第二次获取锁
+	    b). 获取锁之后再被阻塞。所以，在自旋锁占用期间，不能调用可能会引起阻塞的函数。比如：kmalloc()/copy_from_user()/copy_to_user()等等。
+
+
+
+
+
+
+
+

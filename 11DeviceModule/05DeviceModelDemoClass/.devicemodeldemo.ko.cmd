@@ -1,0 +1,1 @@
+cmd_/root/myCodes/Embedded/11DeviceModule/05DeviceModelDemoClass/devicemodeldemo.ko := arm-linux-ld -EL -r   -o /root/myCodes/Embedded/11DeviceModule/05DeviceModelDemoClass/devicemodeldemo.ko /root/myCodes/Embedded/11DeviceModule/05DeviceModelDemoClass/devicemodeldemo.o /root/myCodes/Embedded/11DeviceModule/05DeviceModelDemoClass/devicemodeldemo.mod.o

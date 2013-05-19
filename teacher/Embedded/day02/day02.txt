@@ -1,0 +1,124 @@
+嵌入式Linux设备驱动
+
+
+驱动
+使硬件正常工作的软件
+
+Linux内核编程
+1. 编译工具
+    PC编译工具：gcc
+    ARM编译工具：arm-linux-gcc(交叉编译工具)
+2. GNU C与ANSI C
+    2.1 命名习惯
+	ANSI C:
+	    #define CONST_X 5
+	    char cVar;
+	    int iVarVar;
+	    void FunctionAdd();
+	GNU C:
+	    #define CONST_X 5;
+	    char char_var;
+	    int int_var;
+	    void function_add()
+	    {
+		if() {
+		    int i;
+		};
+	    }
+    2.2 零长度数组
+	struct aaa {
+	    int count;
+	    char c[0];
+	};
+	struct aaa bbb;
+	bbb.c[10] = 10;
+	int so = sizeof(struct aaa);
+    2.3 case语句
+	case 'a':
+	case 'b':
+	case 'c':
+
+	case 'a'-'c':
+    2.4 语句表达式 {}
+	int i = 0;
+	i = 10;
+	printf("i = %d\n", i); //10
+	{
+	    int i = 5;
+    	    printf("i = %d\n", i); //5
+	}
+	printf("i = %d\n", i); //10
+    2.5 typeof判断数据类型
+	#if (condition) // condition == 1
+	    char x;
+	#else
+	    int x;
+	#endif
+	typeof(x) y;  // char y;
+    2.6 可变参数的宏
+	printk(const char *fmt, argument...);
+	//#define DEBUG
+	#if (DEBUG)
+	    #define my_printk(fmt, arg...) printk(fmt, ##arg);
+	#else
+	    #define my_printk(fmt, arg...) {}
+	#endif
+    2.7 标号处理
+	char dat[10] = {0, 0, 0, 0, 0, 1};
+	char dat[10] = { [0...4]=0, [5]=1};
+	struct aaa {
+	    char a;
+	    short b;
+	    int c;
+	};
+	struct aaa ccc = {10, 100, 1000};
+	struct aaa ccc = {
+	    .b = 100,
+	    .a = 10,
+	    .c = 1000,
+	};
+    2.8 当前文件名、函数名称和行号
+	__FILE__
+	__FUNCTION__
+	__LINE__
+    2.9 特殊属性声明
+	__attribute__ ((ATTRIBUTE))
+	section
+	aligned
+	packed
+	unused
+
+	struct aaa {
+	    char a;
+	    short b;
+	    int c;
+	    char *ap;
+	    int *ip;
+	} __attribute__ ((aligned(4)));
+	sizeof(struct aaa);
+    2.10 内建函数(libgcc.a libg++.a)
+	内建函数都是以"__builtin"开头
+	    __builtin_return_address(LEVEL);
+	    __builtin_constant_p(EXP);
+	    __builtin_expect(EXP, C);
+    2.11 do {} while(0);
+    2.12 goto
+	
+
+
+介绍Linux内核源代码目录数
+
+1．编译内核
+2. 配置内核
+3. 修改内核配置，添加模块
+
+
+
+
+
+
+
+
+
+
+

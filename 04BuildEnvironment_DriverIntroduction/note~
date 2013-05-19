@@ -1,0 +1,456 @@
+ 嵌入式Linux设备驱动
+	
+1.首先查看Real6410的物理地址分配，其中我们的 NAND Flash是1GB的，但是给它分配的地址范围却是128MB。
+  这并不是说分配有问题，而是CPU访问NAND Flash的方式决定的。正如访问网卡的方式，分配的物理地址仅仅是一个接口
+  ，我们通过选择向不同接口写入数据来访问NAND Flash。
+
+2.搭建环境
+	tftp服务	rpm -qa | grep "tftp"
+	
+	nfs服务		rpm -qa | grep "nfs"
+	cat /etc/exports
+	exports里面的内容：
+		共享目录 允许访问的主机(访问权限,同步方式,root用户权限)
+	比如：
+		/opt/nfsroot *(rw,sync,no_root_squash)
+  	
+	开机设置nfs启动：
+	     1.setup设置启动
+	     2./etc/init.d/nfs [start|stop|restart]
+	     
+	    检测： mkdir -p /mnt/testnfs
+	    	   mount -t nfs 172.18.2.70:/opt/nfsroot /mnt/testnfs
+	
+3.烧录系统软件
+	1.设置拨码开关，从SD卡启动
+	2.清空 NAND Flash	： nand erase 0  删除整个nand
+	3.写入nand flash u-boot ---- u-boot.bin
+		   tftp c0008000 u-boot.bin  / tftpboot c0008000 u-boot.bin
+		   nand erase 0 40000
+		   nand write c0008000 0 40000
+		   
+	4.从NAND flash 启动
+		 查看ip地址设置，并保存
+
+	5.烧录kernel   --- zImage
+		  ping 172.18.2.70
+		  nand erase 40000 300000
+		  tftpboot c0008000 zImage
+		  nand write c0008000 40000 300000
+		  reset 
+
+	6.烧录cramfs(最小文件系统)  ---root_mkfs.cramfs
+		  nand erase 400000 400000
+		  tftpboot c0008000 root_mkfs.cramfs
+		  nand write c0008000 400000 400000
+		  (先打开minicom的换行功能)
+		  setenv bootargs noinitrd root=/dev/mtdblock0 console=ttySAC0 init=/linuxrc
+		  saveenv
+		  reset
+	7.烧录ubifs(真实文件系统)   --- qtopia.tar.gz
+		 拷贝qtopia.tar.gz到SD卡
+		 重新从NAND FLASH启动板子选择烧录ubifs/qtopia.tar.gz
+		 重启板子进u-boot
+		 setenv bootargs noinitrd root=ubi0:rootfs rootfstype=ubifs ubi.mtd=1 console=ttySAC0 init=/linuxrc
+		 saveenv
+		 reset
+--------------------------------------------------------------------------------
+4.运行程序
+	arm-liunx-strip helloworld-arm  精简可执行文件
+
+ 另一种适用于软件开发的配置过程：
+	这种方式下，Real6410通过本身的 U-BOOT 进行启动，然后从/var/lib/tftpboot/下加载内核文件zImage;
+	从/opt/nfsroot/下加载文件系统。Real6410 只提供硬件部分，运行的OS和文件系统都在我们宿主机上面。
+	
+  配置U-boot
+  1. 配置tftp下载内核
+	setenv serverip 主机IP
+	setenv bootcmd "tftpboot c0008000 zImage;bootm c0008000"
+	saveenv
+	reset
+  2. 配置nfs映射文件系统
+	setenv bootargs noinitrd root=/dev/nfs console=ttySAC0 init=/linuxrc nfsroot=172.18.2.70:/opt/nfsroot ip=172.18.2.71:172.18.2.70:172.18.1.1:255.255.255.0::eth0:on video=fb:WX4300F
+	saveenv
+	reset
+     (IP顺序依次为：主机ip:/opt/nfsroot，板子ip:主机ip:主机网关:主机掩码::eth0:on)
+ 3. 编辑 nfsroot /etc/init.d/rcS
+    /usr/sbin/inetd
+    /usr/sbin/ftpd
+    /usr/sbin/telnetd
+
+--------------------------------------------------------------------------------
+5.嵌入式Linux设备驱动
+	驱动：能够使硬件正常工作的软件。
+
+Linux系统架构：
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+           Application1	          Application2		      Application3
+
+	       |---------------------Libraries-----------------------|			  
+User Mode      |---------------File System content-------------------|  
+================================================================================
+Kernel Mode    |---------------System Call Interfaces----------------|
+       	       -------------------------------------------------------
+	       |						     |
+	       |		      Kernel			     |
+	       |						     |
+	       |		(Hardware Drivers)		     |
+       	       -------------------------------------------------------
+================================================================================
+Hardwares          Device1         Device2          Device3   
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+内核编程：
+   下面的语法特性是由 GUN C 编译器支持的：
+	1. 零长度数组
+	struct demo{
+	       int count;
+	       char c[0];
+	};
+	struct demo bbb;
+	bbb.c[10]=10;
+	sizeof(struct demo)==4
+	编译器会把char c[0]直接翻译成指向 int conut 后的一个地址，所以，不会在占用内存空间。
+	
+	2.case 语句
+	case 'a':
+	case 'b':
+	....
+	case 'm':
+	可以直接写成： case 'a'-'m':
+	
+	3.语句表达式 {}
+	
+	4.typeof 运算符，由编译器支持 ,判断数据类型
+		 #if (condition)
+		     char x;
+		 #else
+		     int x;
+		 #endif
+		 ......
+		 typeof(x) y;  // 定义一个和 x 类型相同的变量
+	
+	5.可变参数的宏
+		printk(const char* fmt,...);
+		
+		#define DEBUG 
+		#if (DEBUG)
+		    #define my_printk(fmt,arg...) printk(fmt,##arg);
+		#else
+		    #define  my_printk(fmt,arg...) {}
+		#endif
+		 
+	6.标号处理
+		char dat[10]={0,0,0,0,0,1};
+		char dat[10]={[0...4]=0,[5]=1};
+
+		struct A{
+		       char a;
+		       short b;
+		       int c;
+		};
+		struct A aa={10, 100, 1000};
+		struct A aa={.a=10, .c=100, };  //注意，最后的一个',' 一定要有
+	
+	7.特殊的宏
+		当前的文件名：  __FILE__
+		当前的函数名：  __FUNCTION__
+		行号：	       __LINE__
+		
+	8.特殊属性声明
+		__attribute__((ATTRIBUTE))
+		section  指定一个段
+		aligned  对齐
+		packed   紧凑布局
+		unused   
+		
+	9.内建函数(libgcc.a  libg++.a)
+	       内建函数都是以 "__builtin" 开头
+	       __builtin_return_address(LEVEL);  返回LEVEL深度 函数的返回地址
+	       __builtin_constant_p(EXP);    判断表达式EXP的值是否是一个常量
+	       __builtin_expect(EXP, C);   判断表达式EXP的值是否和常量C相等
+	
+	10. do{} while(0)
+	
+	11. goto
+	    
+	12. ARM可配置成大端或者小端模式，通常情况下是小端
+
+内核文件介绍：
+	/init/main.c 中的start_kernel()是整个内核的C语言入口。
+	/arch/arm/boot/compressed/head.S 是真正的汇编入口
+	/arch/arm/plat-s3c/include/plat/partition.h
+
+--------------------------------------------------------------------------------
+内核编译 menuconfig 的工作原理：
+     每一个子模块下面都有一个 Kconfig 文件，其对应着 menuconfig 选择项里面的一个页面；
+我们可以通过修改这个文件来在menuconfig里面添加一个自定义的选项(比如HELLOWORLD)；然后再修改目录下的
+Makefile，添加一项 
+		   obj-$(CONFIG_HELLOWORD)	+=raw.o
+这样当我们选择该自定义选项时，在根目录下面的 .config 中就会生成 CONFIG_HELLOWORLD=y .
+这样当我们在根目录调用  make 的时候就会根据 /.config 的确定子模块的 Makefile 是否包括指定的文件.
+
+================================================================================
+内核模块
+	1. 包含内核头文件
+	    #include <linux/init.h>
+	    #include <linux/module.h>
+	2. 函数体
+	    int __init helloworld_init(void)
+	    {}
+	    void __exit helloworld_exit(void)
+	    {}
+	3. 初始化/退出函数
+	   module_init()
+	   module_exit()
+--------------------------------------------------------------------------------
+在内核中加载信模块的方法:
+	1. 将代码添加到内核源代码指定的目录
+	2. 修改指定目录下的Kconfig文件添加对新模块的配置支持
+	3. 修改指定目录下的Makefile文件添加对新模块的编译支持
+	4. 在内核代码目录执行 make menuconfig 选择新模块
+	   
+--------------------------------------------------------------------------------
+以模块方式编译helloworld
+	1. 修改Kconfig文件将bool修改为tristate
+	2. 在make menuconfig中选择为M以模块方式编译
+	3. 在.config中确认CONFIG_HELLWORLD=m
+	4. 执行make zImage重新生成内核
+	5. 执行make modules 编译内核中所有被配置为以模块方式编译的内核代码
+	6. 执行make modules_install INSTALL_MOD_PATH=/opt/nfsroot
+    (生成的文件会在:/opt/nfsroot/lib/modules/2.6.28.6/kernel/drivers 下)
+
+模块操作命令:
+	1. modprobe 命令
+	   加载模块到内存中运行,或者卸载一个已经在内核中运行的模块
+	   在模块加载过程中,如果模块有依赖模块,modprobe 将同时加载该模块的依赖模块
+	   modprobe modulename
+	   modprobe -r modulename
+	   (上面这两条指令可以在任意目录执行)
+
+	2. lsmod 命令
+	   列出当前系统中正在运行的模块
+	   该命令实际上是读取/proc/modules 文件中的内容
+
+	3. insmod 命令
+	   加载模块到内存中运行
+	   insmode modulename.ko
+	   它不会进行加载依赖的模块,并且需要指定文件路径和'.ko'
+
+	4. rmmod 命令
+	   从内存中卸载一个正在执行的模块
+	   rmmod moublename
+
+	5. modinfo 命令
+	   查看模块的信息
+	   modinfo modulename.ko
+
+--------------------------------------------------------------------------------
+模块License信息
+	必须为模块指定license,常用:
+	MODULE LICENSE("Dual BSD/GPL");
+	有效的许可证:
+		"GPL"
+		"GPL V2"
+		"GPL and additional rights"
+		"Dual BSD/GPL"
+		"Dual MPL/GPL"
+		"Proprietary"
+	
+	模块信息
+		MODULE_LICENSE();
+		MODULE_AUTHOR();
+		MODULE_DISCRIPTION();
+		MODULE_VERSION();
+		MODULE_ALIAS();
+
+--------------------------------------------------------------------------------
+模块导出符号:
+	1. 导出符号的意义?
+	2. 如何导出符号?
+	   EXPORT_SYMBOL(symbol_name);
+	   EXPORT_SYMBOL_GPL(symbol_name);
+	   后者仅仅用于包含GPL许可证的模块. 
+
+注意:安装的时候要先删除之前生成的2.6.28.6文件夹	
+
+--------------------------------------------------------------------------------
+关于printk
+	printf只能在应用程序中使用，printk只能在内核文件中使用；
+	printk允许根据严重程度，通过附加不同的“优先级”来对消息进行分类。
+	printk输出的信息优先级(按递减顺序)
+	在内核源代码include/linux/kernel.h中定义
+	------------------------------
+#define KERN_EMERG      "<0>"   /* system is unusable                   */
+#define KERN_ALERT      "<1>"   /* action must be taken immediately     */
+#define KERN_CRIT       "<2>"   /* critical conditions                  */
+#define KERN_ERR        "<3>"   /* error conditions                     */
+#define KERN_WARNING    "<4>"   /* warning conditions                   */
+#define KERN_NOTICE     "<5>"   /* normal but significant condition     */
+#define KERN_INFO       "<6>"   /* informational                        */
+#define KERN_DEBUG      "<7>"   /* debug-level messages                 */
+	------------------------------
+
+	printk的默认优先级是 4 
+		DEFAULT_MESSAGE_LOGLEVEL   4
+	如果不指定printk优先级,将使用默认值 .
+		MINIUM_CONSOLE_LOGLEVEL	   1
+		DEFAULT_CONSOLE_LOGLEVEL   7
+	想要查看终端中的printk优先级,对应内核目录中的 kernel/printk.c
+	
+/* printk's without a loglevel use this.. */
+#define DEFAULT_MESSAGE_LOGLEVEL 4 /* KERN_WARNING */
+
+/* We show everything that is MORE important than this.. */
+#define MINIMUM_CONSOLE_LOGLEVEL 1 /* Minimum loglevel we let people use */
+#define DEFAULT_CONSOLE_LOGLEVEL 7 /* anything MORE serious than KERN_DEBUG */
+
+DECLARE_WAIT_QUEUE_HEAD(log_wait);
+
+int console_printk[4] = {
+        DEFAULT_CONSOLE_LOGLEVEL,       /* console_loglevel */
+        DEFAULT_MESSAGE_LOGLEVEL,       /* default_message_loglevel */
+        MINIMUM_CONSOLE_LOGLEVEL,       /* minimum_console_loglevel */
+        DEFAULT_CONSOLE_LOGLEVEL,       /* default_console_loglevel */
+};
+--------------------------------------------------------------------------------
+		cat /proc/sys/kernel/printk 
+		PC 机中的设置为 : 6       4       1       7
+		ARM 机中的设置为: 7       4       1       7
+
+/* cat > /proc/sys/kernel/print 回车 再输入8 再按 Ctrl+D 来修改printk的默认等级 */
+--------------------------------------------------------------------------------
+
+模块参数:
+	1. 模块参数声明
+	   module_param(name, type, perm)
+	   	name: 模块参数名称
+		type: 模块参数数据类型
+		perm: 用户对参数的操作权限
+		
+	2. 常见的几种模块参数数据类型
+		bool :	布尔
+		short : 短整形
+		int :  整形
+		long : 长整型
+		charp :字符串 
+		
+	3. 操作权限
+		在内核源代码include/linux/stat.h 中定义
+		S_IRUSR
+		S_IWUSR
+		S_IXUSR
+		S_IRWXU  用户读写执行权限
+
+		S_IRGRP
+		S_IWGRP	
+		S_IXGRP
+		S_IRWXG  当前用户组读写执行权限
+		
+		S_IROTH
+		S_IWOTH
+		S_IXOTH
+		S_IRWXO  其他用户组用户读写执行权限
+
+#define S_IRWXUGO       (S_IRWXU|S_IRWXG|S_IRWXO)
+#define S_IALLUGO       (S_ISUID|S_ISGID|S_ISVTX|S_IRWXUGO)
+#define S_IRUGO         (S_IRUSR|S_IRGRP|S_IROTH)
+#define S_IWUGO         (S_IWUSR|S_IWGRP|S_IWOTH)
+#define S_IXUGO         (S_IXUSR|S_IXGRP|S_IXOTH)
+
+	4. 参数说明
+		MODULE_PARM_DESC(name, description);
+		name: 要增加描述的模块参数名称
+		description: 对模块参数的描述
+		
+	5.参数数组
+		module_param_arry(name, type, length, perm)
+		name: 模块参数名称
+		type: 模块参数数据类型
+		length: 模块参数数组长度
+		perm: 用户对参数的操作权限
+		
+	6. 模块参数在文件系统中的位置
+	     /sys/modules/当前模块名称目录/parameters/
+ 	7. 模块参数赋值
+	    1.初始化赋值
+		insmod modulename moduleparam=100
+	    2.修改文件内容
+		
+--------------------------------------------------------------------------------
+内存管理：
+     1.地址
+	1.1 物理地址
+	1.2 线性地址 (虚拟地址)
+	1.3 逻辑地址 (相对地址)
+
+     2. 地址转换	
+     3. 段式内存管理 和 页式内存管理
+     
+     4. 进程地址空间
+     	 1. 虚拟地址空间
+	 2. 内存分配
+		实际的物理内存仅当进程真实访问新获取的虚拟地址时,才会由"请页机制"产生
+		"缺页异常",从而进入分配内存的程序.
+		缺页异常:是虚拟内存机制的基本保证--由它告诉内核为进程分配物理内存页,并建立页表.
+		这样,虚拟内存才真实的映射了物理内存.
+		
+          用户空间内存分配:
+		malloc  free
+	  内核空间分配内存:
+		1.按大小来分配
+			kmalloc  /linux-2.6.28.6/include/linux/slab_def.h 
+			static inline void* kmalloc(size_t size, gfp_t flags);
+			  flags: 分配标志,用于控制kmalloc的行为
+			  GFP_KERNEL:标志该次内存分配有内核进程调用.如果空闲空间不够,该次分配
+			             将使得进程进入睡眠,等待空闲页出现
+			  GFP_ATOMIC:用于分配请求来自于中断,任务处理队列,内核定时器等中断上下
+				      文的情况,这时候不能进入睡眠.内核代码可能在任何时候被中断,
+				      所以,要保证内核函数必须是可重入的.
+
+			  __GFP_DMA:用于分配DMA功能的内存区(通常物理地址在16MB以下)
+			  __GFP_HIGHMEM:用于分配高端内存 896MB 以上
+		2.按页来分配
+			/linux-2.6.28.6/include/linux/gfp.h
+			unsigned long get_zeroed_page(gtp_t flags);
+				 分配一个页面,返回指向新页面的指针,并且将内存页面内容清零
+			unsigned long __get_free_pages(gfp_t mask, unsigned int order);
+			分配若干个连续的页面,返回指向该内存区域的指针,不清零这段内存空间
+  			(注意:在内核中有时会把地址当作int/long的数据来看待.)
+		3.释放内存
+			对于申请的内存必须释放,否则将导致系统错误.
+			void kfree(const void*);  
+			     释放kmalloc申请的内存
+			#define free_page(addr) free_pages((addr),0)
+			     释放get_zeroed_page()分配的页面
+			void __free_pages(unsigned long addr, unsigned int order)
+			     释放__get_free_pages()分配的所有页面
+
+
+----------------------------------------
+	   内核地址空间:
+	      内核地址空间由内核负责映射,是固定的,不随进程改变.
+   物理地址:  0-896MB: 称为"内存直接映射区".
+	      896-1016MB: 896MB向上最大120MB 称为"动态映射区",是由内核动态分配使用的.
+	      1016-1020: 4MB 称为"永久内存映射区",
+	      1020-1024: 4MB 称为"固定映射区",其中最上面的4KB的地址用于隔离内核地址和其他程序,
+	      	         称为 "4M隔离区."
+	      
+	      ---------
+	      |-------|
+	      |	      |
+	      |-------|  用户应用程序
+	      |-------|
+	      |	      |
+--------1024M-|-------|-------------------------0x40000000
+	      |  4M   | 固定映射区(4M隔离区)  
+	1020M |-------|-------------------------0x3fc00000
+	      |	 4M   | 永久内存映射区
+	1016M |-------|-------------------------0x3f800000
+	      |	128M  | 动态映射区
+	 896M |-------|-------------------------0x38000000
+	      |	      |
+	      |	      | 内存直接映射区
+            0 ---------
+	    
+	    (逻辑内存分布图)

@@ -1,0 +1,429 @@
+0.关键字
+	EABI :Embedded Application Binary Interface
+	FPA :Float Point Architecture 硬浮点运算
+	FPE :Float Point Emulation    浮点模拟
+	VFP :Vector Float Point       矢量浮点
+	AMBA :Andvanced Microcontroller Bus Acitecure    高级微控制器总线架构
+	APB :Advanced Pherioheral Bus           高级外设总线
+	AHB :AMBA High-performance Bus 
+	AXI : Advanced extensible Interface
+	CPSR :Current Program Status Register   当前程序状态寄存器
+	SPSR :Save Program Status Register   备份程序状态寄存器
+
+
+
+SPSR：是异常模式下的CPSR的备份寄存器，当一个异常发生时保存当前的CPSR值。结合连接寄存器R14可以
+	返回到程序的先前状态。
+
+0.ARM寄存器
+	ARM 的通用寄存器可以分成：未分组寄存器(R0-R7),分组寄存器(R8-R14) 和 程序计数器PC R15.
+	@ 未分组寄存器
+	   R0－R7是未分组的，在物理上只有一组，在任何模式下使用R0－R7都是使用的同一组寄存器；
+	   在异常模式切换时要对R0－R7寄存器的内容进行入栈保存。R0－R7在THUMB状态下又称“低组寄存器”，
+	   R8－R15又称“高组寄存器”。
+	@ 分组寄存器
+	   R8－R14是分组寄存器，具体访问那个寄存器取决于当前处理器模式。
+	   R8－R12在物理上有两组，在FIQ模式下使用自己专有的R8－R12，而其他模式使用同一组寄存器。当FIQ
+	   到达时，可以使用自己模式专有的R8－R12寄存器，不用保存原来的寄存器，从而提高速度。
+	   R13－R14，分别对应6组不同的物理寄存器。USR／SYS两者共用一组。
+	   R14用途有二： 1 用来存储子程序的返回地址
+	   		 2 当异常发生时R14中保存的值等于异常发生时PC的值减4／2,以返回到异常发生前的位置继续执行
+	    
+  	    R14使用举例：
+		从子程序中返回：   mov pc,lr       /     bl  lr
+		在子程序入口处将寄存器入栈:   stmfd  sp!,{r0-r7,lr}
+			(这条指令将R0-R7和lr入栈)
+		在子程序返回时数据出栈:   ldmfd sp!,{r0-r7,lr}
+		从异常中返回:    subs pc,lr,#4
+
+	 @ R15的注意事项：
+	    32CPU的指令地址后两位一定为0，16CPU的指令地址最后一位一定为0，在进行地址赋值时要注意，
+	    否则会出现意想不到的结果活或错误。
+	    由于ARM流水线的原因，R15/PC里面存放的是当前执行指令的地址加8/12，在保存R15时要注意。
+	    读PC的作用主要用于快速地对临近的指令或数据进行位置无关寻址，包括程序中的位置无关寻址。
+	    可以使用下面的代码来测试PC的偏移是多少：
+			sub r1,pc,#4
+			str pc,[r0]
+			ldr r0,[r0]
+			sub r0,r0,r1
+			
+
+
+
+1.ARM系列
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+	ARM 7
+	ARM 7 TTMI 是更常说的“ARM7”
+
+	StrongARM   ----Intel设计的架构
+
+	ARM 9
+   	ARM 9 TTMI 也是更常说的"ARM9"
+	(自ARM9系列向后，都具有TTMI的功能，所以，都省略了TTMI)
+
+	Xscale      ----Intel设计的架构
+	
+	ARM11
+	
+	Cortex ： M系列  A系列  R系列
+	       ： M系列 的运算能力近似于 ARM7，但是由于具有新的架构，效率有所提升
+	       ： R系列 在M系列的性能基础上的，多出的重点在于实时性上
+	       ： A系列 高端的处理器架构
+	(Cortex的设计有部分的改变，与之前的ARM系列有些不同)
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+	我们的程序的可移植性所关注的是芯片的“架构”和“内核”。
+	"内核"：是指设计处理器的集成电路设计方案，也就是芯片的内部逻辑 。
+	比较经典的架构有：ARMV4T 和 ARMV6 架构。Cortex采用的是 ARMV7-M , ARMV7-R , ARMV7-A
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+	当设生产厂商，获得ARM 的IP CORE知识产权授权以后，会在IP CROE的外围添加各种设备控制芯片，比如USB控制器，
+	声卡/网卡控制器等，然后把它们封装到一片芯片中，就成了各个厂商推出的“ARM处理器”。
+
+2.ARM的体系结构
+	
+	>>ARM流水线
+		提高CPU执行效率的方法：1.提高时钟频率，但同时意味着高功耗和信号干扰，对于嵌入式设备不利
+				      2.多条流水线
+		RAM7 采用3级流水线：取指、译码、执行
+		RAM9 采用5级流水线：取指、译码、执行、缓冲、回写
+
+3.存储设备
+	硬盘--固态存储器--内存--（片内内存）--i(instrunction)cache，d(data)cache----write buf。
+	
+	片内： 1.rom
+	       2.ram:如果片内集成ram的话，一定是sram
+	       	       
+	片外： 1.rom：nor flash（nand flash），可擦写，但是会有坏块，nor flash类似于内存；nand flash类似于硬盘
+	       2.ram：sram(s是指同步)，sdram 
+	              sram:是速度很高，成本也很高,一个锁存器(两个触发器(多个门电路))
+		      sdram:速度高，成本较低，但是需要定时加电刷新，造成访问延迟
+		      sram里面的数据可以直接读取，其中存放的程序可以直接执行；
+		      sdram必须先进行初始化或刷新等操作，所以，其中的数据不可以立即读取或执行。
+		      (比如BIOS负责内存的定时刷新)
+
+      MMU：内存管理单元，用于虚拟地址和物理地址的映射。
+
+4.ARM的 I/O 结构
+	ARM采用的外设和内存“统一编址”；x86采用的是“独立编址”。  某一个设备的地址需要厂商提供的手册中去查询。
+
+5.ARM的协处理器
+	ARM规定最大支持16个协处理器。 自ARM7TTMI以后，所有的ARM都把 15号协处理器指定为“系统控制”； 14号协处理器指定为“调试控制器”。
+	MMU和保护单元系统控制采用CP15协处理器；  CP：coprocessor
+	JTAG调试协处理器为CP14；
+
+6.ARM AMBA接口
+      AMBA(Andvanced Microcontroller Bus Acitecure)高级微控制器总线架构。
+      板级总线：比如控制器和外部设备的连线
+      片内总线：比如在芯片内部各个控制器之间的连线
+   
+      第一代总线：   APB :Advanced Pherioheral Bus           高级外设总线
+      第二代总线：   AHB :AMBA High-performance Bus 
+      第三代总线：   AXI : Advanced extensible Interface
+      
+      JTAG调试接口，直接连于处理器芯片
+
+7.ARM处理器工作模式
+	ARMv4/5都具有7中处理器模式：
+	>>用户模式:usr  一般的应用程序都在用户模式下执行
+	>>系统模式:sys  系统级应用程序，比如操作系统本身
+	>>快速中断模式: fiq 快速的中断处理
+	>>中断模式: irq 主要用于处理中断任务
+	>>管理模式:svc 负责系统管理，主要负责：1.当ARM上电时默认执行的程序就执行在管理模式
+					     2.当软中断发生的时候，程序会工作在管理模式(由软件触发的中断)
+              管理模式svc是系统复位后的默认模式。
+	      当运行在用户模式下的程序需要提权执行时，通过管理模式执行程序。
+	
+	>>中止模式: abt 当一个程序由于某些原因无法再执行时，应急程序会工作在中止模式下。(指令出错/数据出错)
+	>>未定义指令模式: und 当cpu遇到不识别的指令时进入的模式
+
+8.ARM处理器工作的状态(包含ARM11以及以前的系列)
+	1.ARM状态
+		32位，执行字对准的32位ARM指令；
+	2.Thumb状态
+		16位，执行半字对准的16位Thumb指令。(由于硬件的发展，Thumb重要性有所降低)
+
+9.ARM的寄存器
+	R0---R15：通用寄存器，R13，R14，R15都有一个额外的作用：
+	R13 : 堆栈指针寄存器，程序中临时变量存储的首地址。SP.
+	R14 : 链接寄存器,保存函数返回地址。LR
+	R15 : 程序计数器，指向当前正在执行的指令地址。PC	
+       
+	系统模式和用户模式共用R13/R14，其他模式分别拥有自己的R13/R14.
+	因为系统模式需要对用户运行的程序有完全的控制权，所以，两者要共用同一个R13/R14；
+	而其他模式可以看成是“异常模式”，异常的发生是随机的，如果和用户模式共用一个R13/R14，就会导致程序返回地址被修改，
+	进而导致程序错误。
+	主要是有一个“主动”和“被动”的概念，在用户模式和系统模式下，程序或/OS都会“主动”的去进行函数调用或进程调度，这时都会将
+	SP/LR入栈保存。但是，如果在“异常模式”，由于异常的出现是"随机的"“被动的”，所以，无法进行SP/LR的保存，所以，两种模式
+	应该具有自己的R13/R14.
+	注意：不同模式不能访问其他模式的私有的寄存器！
+
+	CPSR: Current program status register CPSR是所有模式都可以访问的寄存器，保存程序运行的状态。
+	SPSR_svc, SPSR_irq,SPSR_fiq,SPSR_abt,SPSR_und 是当异常出现时用于保存CPSR的各个模式的程序状态寄存器。
+
+	通过改写CPSR的低5位，可以主动的切换到特定的模式去执行。
+	
+	问题举例：为什么R13/R14不能像R0-R8一样在不同模式进行切换时，把R13/R14入栈保存？
+		这个问题突出了R13/R14特殊意义的作用，因为异常出现是无法预先保存R13/R14的，是被动修改的。但是，R0-R8的使用
+		是在异常模式运行中使用的，这时我们可以在使用前进行入栈保存即可，是主动有计划的修改的。
+
+10.指令
+	<instruction>{<cond>}{S} Rd, Rn,N	
+	数据处理指令：
+		mvn  r0,#0
+		mov  r0,#0xffffffff  @error,32bits不能都用于存放立即数，还有一部分存放命令
+	算术运算指令：add,adc,sub,rsb,sbc,rsc
+	逻辑运算指令：AND(按位与),ORR(按位或),EOR(按位异或),BIC( Rd=Rn&~N )
+		    非的操作可用：mvn 
+		    r=r&(~0x1)
+		    r=r&(~(1<<3))
+		    bic r0,r0,#0x1
+		    orr r0,ro,#0x1
+
+	比较指令：比较指令指示修改CSPR寄存器，所以它没有Rd和S标志,运算结果不保存，会设置标志位。
+		 <instruction> {<cond>} Rn,N
+		 cmp r0,#2 
+	乘法指令：
+		MLA{<cond>}{S} Rd,Rm,Rs,Rn
+		MUL{<COND>}{s} Rd,Rm,Rs
+		MLAL
+		MULL
+		SMULL:有符号的长乘法
+		UMLAL:无符号的长乘法
+	
+		LSL: logical shift left
+		LSR: logical shift right
+		ASR: arithmetic shift right
+		ASL: arithmetic shift left
+		ROR: rotate right   只有循环右移
+		RRX: rotate right extendbale  带扩展的循环右移
+		没有算术左移，因为算术左移会把符号位移走！！！
+			
+********************************************************************************
+	寻址方式：
+		立即数寻址
+		寄存器寻址
+		立即数逻辑左移： mov r0,r1,lsl #1   把r1中的内容逻辑左移一位，然后赋值给r0
+		寄存器逻辑左移： mov r0,r1,lsl r2   把r1中的内容逻辑左移r2中数据的位数，然后赋值给r0
+		
+		九种寻址方式>>>
+		立即数前变址寻址：ldr r0,[r1,#4]
+		寄存器前变址寻址：ldr r0,[r1,r2]
+		移位前变址寻址：  ldr r0,[r1,r2,lsl #1]
+		立即数回写前变址寻址：ldr r0,[r1,#4]!
+		寄存器回写前变址寻址：ldr r0,[r1,r2]!
+		移位回写前变址寻址：  ldr r0,[r1,r2,lsl #1]!
+		立即数后变址寻址：ldr r0,[r1],#4
+		寄存器后变址寻址：ldr r0,[r1],r2
+		移位后变址寻址：  ldr r0,[r1],r2,lsl #1
+********************************************************************************
+	多寄存器读写操作：LDM/STM
+		<LDM|STM>{<cond>}<addressing mode> Rn{!},<registers>{^}
+		其中的 Rn 虽然没有'[]',但是它代表内存中的一片内存的首地址;
+		<registers> 代表必须有多个寄存器
+		^ 可以同时更新SPSR的内容到CPSR里面，常用于模式切换
+		
+		ldm r0,{r1,r2}  将r1,r2的值放到以r0为首地址的内存中去
+		I increment D decrement
+		B before A after
+		ldmib  ： 先进行地址增加，然后取值放到寄存器组里面
+		ldmda  ： 先进行取值放到寄存器组里面，然后在进行地址增加
+		
+		栈：
+		   增(Ascending)栈
+		   减(Dscending)栈
+		   满(Full)栈：不可以再向栈中存放数据，已经满
+		   空(Empty)栈：可以再放入数据，栈未满
+		   
+		   ldmfa: 满栈增
+		   ldmed: 空栈减
+		   ldmfd: 满减栈 (ARM规定使用满减栈)
+		   ldmea: 空增栈 
+		
+		跳转指令
+		b,bx,bxl,bl
+		
+		b：循环用
+		bl：函数调用使用，结束后返回
+		bx：模式切换，ARM和THUMB切换
+		blx：模式切换函数调用
+	
+
+
+		交换指令：
+		  SWP{B}{<cond>} Rd,Rm,[Rn]
+		  <<先把内存Rn中的原来的值放到寄存器Rd里面,同时再把Rm的内容放到Rn指定的内存中。
+		  在一个时钟周期中即对内存写，又读取内存。
+
+		swp寄存器和内存之间的数据交换
+		swp r0,r1,[r2]  把r2指向的内存数据存到r0，同时把r1赋值给r2
+		swpb
+
+		程序状态寄存器操作：
+		 msr move status <----register
+		 mrs move register <----status
+		 
+		 MRS{<cond>} Rd,<cpsr|spsr>
+		 MSR{<cond>} <cpsr|spsr>_<fields>,Rm
+		 MSR{<cond>} <cpsr|spsr>_<fields>,<Rm|N>
+		 
+		 msr cpsr_fsxc,r0
+		 mrs r0,cpsr
+		 msr cpsr_c,0xd2
+		 程序状态字段域: f s x c
+		 
+		
+		
+		ARMv5新增指令
+
+		CLZ(count leading zeros)计算前导0个数
+		可以用来计算中断控制器中发生的中断号。
+
+		饱和指令：
+		Q标志位在ARMv5中才有
+		QADD
+		QDADD
+		QSUB
+		QDSUB
+
+		ARMv6新增指令
+		ldrex
+		strex
+		用来代替ARMv4中的swp指令，实现锁的功能。
+
+指令的长度限制：
+由于指令长度32位。
+
+mov指令和其他数据处理指令：
+	满足immediate小于8位或者immediate<<(rotate*2)，rotate是4位，得到的数值都是合法的。
+	mov r0,#0xff
+	mov r0,#0xcf0
+	mov r0,#0xea00
+	mov r0,#0xc1000
+	mov r0,#0x30c    由11000011左移两位得到001100001100，rotate=1。
+以上都是合法的
+
+ldr指令：
+	ldr r0,[r1,#0xfff]  immediate不能超过12位
+
+B指令：
+	跳转到前后共64M以内相对地址空间的限制。
+	虽然B指令的偏移量是24位即16M空间
+但是指令地址末尾永远是0X0,0X4,0X8,0XC，末尾两位是0。所以B指令的偏移量immediate实际是26位的即64M空间。	
+B指令在运行时可能发生很隐蔽的错误，即超过了寻址空间范围。
+
+
+ldr即是指令，又是伪指令，根据用法区分：解决mov指令的范围限制
+ldr r0,[r1]    指令
+ldr r0,=0x20  伪指令，等同于 mov r0,#0x20,并且不受指令寻址空间限制。例如：
+ldr r0,=0xff124300是合法的.
+
+adr伪指令：解决b指令的范围限制
+adr rd,label
+可以解决b指令超过寻址范围的问题。
+adr r0,helloworld
+mov pc,r0不存在超过寻址范围的问题，而
+b helloworld可能出问题。
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+编译指令：
+	对于.S文件：
+	arm-linux-gcc -c exp.S
+	arm-linux-gcc -nostdlib -nostartfiles -e entryFunc -Ttext c0008000 exp.o
+	arm-linux-objcopy -O binary a.out a.bin
+	反汇编：
+	arm-linux-objdump -d a.out
+	查看bin文件：
+	hexdump -C a.bin
+
+       编写连接脚本：
+	链接脚本：
+注意空格，否则会出错
+vi  led.lds:
+
+ENTRY（start）
+SECTIONS
+{
+	.  =  0xc0008000;  // .代表当前位置,代码起始地址,注意这里有个；
+	.text  :{
+		led.o(.text)   //先让led.o先链接，再让剩余代码链接。
+		*(.text)
+}
+.data  :{
+	*(.data)
+}
+.bss  :{
+	*(.bss)
+}
+}
+
+arm-linux-gcc  -nostartfiles  -nostdlib  -T  led.lds  led.o
+-------------------------------------------------------------------
+
+函数返回值或参数的存储位置：
+
+r0—r1返回值寄存器
+r0—r3参数寄存器，当参数多余4个，剩余的交给堆栈
+r4—r11全局变量寄存器
+r12调用过程间备份寄存器，可以当通用寄存器用
+
+汇编语言和C语言的混合编程：
+	注意：
+	  在汇编文件中定义的标号/函数 默认是局部的，所以，要在开始的地方添加 
+			.global FuncBiaohao  
+          在使用C的时候，往往还需要些一个start.S文件，来指定整个程序的入口；在C程序汇编以后，
+	 函数对应的标号地址是有函数定义的顺序来决定的，与函数声明和gcc编译指定的地址无关。
+
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+烧写UBOOT：
+1.把电源对角拨码开关全部关闭。插上SD卡，启动开发板。打开超级终端，进入uboot命令行。
+2.在uboot命令行输入如下命令：
+setenv ipaddr 开发板ip（设置开发板ip地址）
+setenv serverip 服务器ip（设置服务器ip地址，若是虚拟机，则是虚拟机ip地址）
+ping服务器
+3.在pc端把光盘linux/linux-image/u-boot.bin 复制到tftp服务器根目录下（/tftpboot）。
+4.在uboot里运行如下命令：
+tftp c0008000 u-boot.bin   （在内存中）
+5.在uboot里运行如下命令：
+nand erase 0 40000
+nand write c0008000 0 40000
+6.关闭开发板电源，把拨码开关第6、7个位置打开，拔掉SD卡
+7.重启。
+8.下载程序
+9.tftp c0008000 hello.bin
+10.go c0008000
+
+当看不到ip时，运行ifconfig  eth0 192.168.10.10
+
+********************************************************************************
+	测试tftp服务：
+		 # tftp localhost
+		 put / get
+
+		 tftp服务器的目录：	 
+
+		 sudo in.tftpd -s -L /tmp/   (/tmp/为tftp的根目录)
+********************************************************************************
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+		 

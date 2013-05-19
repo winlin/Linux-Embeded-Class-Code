@@ -1,0 +1,289 @@
+
+================================================================================
+1.   轮询设备操作
+	1。select系统调用
+	  用于多路监控，当没有一个文件满足条件要求时，select调用将引起进程阻塞。
+	  fs/select.h
+	  do_select()核心函数
+	
+	2。poll操作
+	  unsigned int (*poll)(struct file *filp, struct poll_table_struct *wait);
+	  unsigned int (*poll)(struct file *filp, poll_table *wait);
+	  
+	  filp:文件指针
+	  wait：轮询表指针
+	  轮询操作的任务：
+	    1。使用poll_wait()将等待队列添加到poll_table;
+	    2。返回描述设备是否可读或可写的掩码。
+
+	    include/linux/poll.h
+
+	    typedef void (*poll_queue_proc)(struct file *, wait_queue_head_t *, struct poll_table_struct *);
+	    typedef struct poll_table_struct {
+	    	    poll_queue_proc qproc;
+		    } poll_table;
+
+	  3。poll_wait()函数：
+	  static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
+	  {
+	    if (p && wait_address)
+		p->qproc(filp, wait_address, p);
+	  }
+	  该函数不会引起阻塞，它仅仅是将我们的当前进程添加到wait参数指定的等待列表(poll_table)中。
+	  4。poll函数返回值
+	     通常返回下列定义“或”的结果：
+	      POLLIN        设备可以不阻塞的读，设备本身的缓冲区ready
+	      POLLOUT       设备可以不阻塞的写，设备本身的缓冲区ready
+	      POLLRDNORM     数据可读，驱动程序中的缓冲可读
+	      POLLWRNORM    数据可写，，驱动程序中的缓冲可写
+	      设备可读通常返回： POLLIN|POLLRDNORM
+	      设备可写通常返回： POLLOUT｜POLLWRNORM
+	      
+	  5。poll操作一般结构
+	     unsigned int xxx_poll(...){
+	      	      unsinged int mask=0;
+		      ...
+		      poll_wait();
+		      ...
+		      if(device is ready for read){
+		      	      mask=POLLIN|POLLRDNORM;
+		      }
+		      if(device is ready for write){
+		      		maske=POLLOUT|POLLWRNORM;
+		      }
+		      ...
+		      return mask;
+	    }
+	    poll操作是提供给系统select()调用的。
+   
+   ================================================================================
+2.
+阻塞: 设备为就绪则阻塞进程
+非阻塞: 设备为就绪则直接返回状态
+轮询: 由应用程序通过查询状态判断设备是否就绪 --poll
+
+驱动程序中主动向应用成主动报告设备的读写状态:
+异步: 一旦设备就绪, 主动通知应用程序
+
+在Linux中,我们的异步机制使用 信号 来实现. 在 arch/arm/include/asm/signal.h
+在Fedroa6中共有 62个信号: 1-31是非实时信号 , 34-64是实时信号
+
+   在设备驱动程序中应该增加信号释放的相关处理:
+       1. 设置F_SETOWN命令处理
+        调用fcntl需要将filp->owner设置为对应进程的ID, 虚拟文件系统已经完成此步骤.
+
+       2. 设置F_SETFL命令处理
+        每当FASYNC标志改变时,驱动中的fasync()函数将得以执行,所以驱动程序中应实现一个fasync()函数,
+	来获取捕获这个改变,来设置设备数据结构的 async_queue 指针.
+	!!!这会引起驱动程序中 fasync() 函数的调用.!!!
+		
+       3.释放信号
+         在驱动中通过调用kill_fasync()函数释放相应的信号
+       4. fasync_struct 数据结构
+          include/linux/fs.h
+struct fasync_struct {
+	int	magic;
+	int	fa_fd;
+	struct	fasync_struct	*fa_next; /* singly linked list */
+	struct	file 		*fa_file;
+};
+
+   常见用法: 在驱动程序数据结构中包含fasync_struct数据结构指针成员.
+        struct XXX_cdev{
+	       ...
+	       struct fasync_struct *async_queue;
+	       };
+       5. fasync()函数
+        在file_operations数据结构中定义:
+	int (*fasync)(int fd, struct file *filp, int mode);
+	
+	常见实现:
+	 static int xxx_fasync(int fd, struct file *filp, int mode)
+	 {
+		struct xxx_cdev *pcdev=filp->private_data;
+		return fasync_helper(fd, filp, mode, &pcdevp->async_queue);
+	 }
+       6. kill_fasync()函数
+       	  释放信号. 在我们的设备资源可以获得的时候, 应该调用该函数释放SIGIO信号. 可读时为 POLL_IN;
+	  可写的时候为 POLL_OUT .
+	  fs/fcntl.c
+	  void kill_fasync(struct fasync_struct **fp, int sig, int band);
+	  应当在驱动程序的write操作中调用.
+
+	  常见实现:
+	      static ssize_t xxx_write(...){
+	      	     struct xxx_cdev *cdev=filp->priate_data;
+		     ...
+		     if(cdev->async_queue) {
+		     	   kill_fasync(&cdev->async_queue, SIGIO, POLL_IN);
+ 		     }
+		     ...
+	      }
+      7.删除我们的异步通知
+         在文件关闭release函数中实现. 应该调用驱动的fasync()将文件从异步通知列表中删除.
+	 
+	 常见实现:
+	 static int xxx_release(...)
+	 {
+		...
+		xxx_fasync(-1, filp, 0);
+		...
+	 }
+	 
+       ----------------------------------------
+       当一个进程收到SIGIO,它不知道是那个文件有新数据提供. 
+       如果有多个文件被使能异步通知挂起输入进程, 应用程序必须依靠select()来找出具体是那个文件发生变化.
+       
+       ----------------------------------------
+       异步IO
+       字符设备很少用到异步IO, 对于块设备和网络设备本身就是异步的.
+
+       
+     ================================================================================
+中断和定时器:
+
+1.中断:
+	安来源分类
+	安是否可以屏蔽分类
+	安入口方法分类:   向量中断    
+			 非向量中断: 多个中断共享一个入口地址, 由软件通过中断标志来识别具体的中断
+	硬件定时器:
+	
+Linux中断处理程序结构:
+1. 在Linux系统中中断处理程序分解为两个半部: 顶半部(Top Half) 底半部(Bottom Half)
+  顶半部: 完成尽可能少的比较紧急的功能,往往只是简单的读取寄存器的中断状态,并且负责清除中断标志,
+  	  然后再进行"登记中断" 的工作, 也就是将底半部处理程序挂在该设备的底半部执行队列中去,
+	  该过程不可中断.  该过程屏蔽所有中断
+  底半部: 它将完成中断事件的大部分任务, 该部分任务不是十分紧急,并且相对来说比较耗费时间,
+   	  该部分可以被新的中断打断.
+
+2. 中断申请和释放
+   在内核源代码 kernel/irq/manage.c中实现
+   1. 申请IRQ
+      int request_irq(unsigned int irq, irq_handler_t handler,
+		unsigned long irqflags, const char *devname, void *dev_id)
+
+    request_irq - allocate an interrupt line
+ *	@irq: Interrupt line to allocate  待申请的中断号
+ *	@handler: Function to be called when the IRQ occurs
+ *	@irqflags: Interrupt type flags
+ *	@devname: An ascii name for the claiming device 中断设备的名称
+ *	@dev_id: A cookie passed back to the handler function 传递给中断处理函数的指针, 通常用于共享中断时传递
+ 	设备结构体
+
+	Flags:
+ *
+ *	IRQF_SHARED		Interrupt is shared 多个设备共享
+ *	IRQF_DISABLED	Disable local interrupts while processing
+ *	IRQF_SAMPLE_RANDOM	The interrupt can be used for entropy 用于随机数种子的随机采样
+ *	IRQF_TRIGGER_*		Specify active edge(s) or level
+ 	IRQF_TRIGGER_RISING: 上升沿触发
+	IRQF_TRIGGER_FAILING: 下降沿触发
+
+  2. 释放IRQ   
+/**
+ *	free_irq - free an interrupt
+ *	@irq: Interrupt line to free
+ *	@dev_id: Device identity to free
+ *
+ *	Remove an interrupt handler. The handler is removed and if the
+ *	interrupt line is no longer in use by any driver it is disabled.
+ *	On a shared IRQ the caller must ensure the interrupt is disabled
+ *	on the card it drives before calling this function. The function
+ *	does not return until any executing interrupts for this IRQ
+ *	have completed.
+ *
+ *	This function must not be called from interrupt context.
+ */
+void free_irq(unsigned int irq, void *dev_id)
+
+  3. 使能和屏蔽特定的中断
+      kernerl/irq/manage.c 
+
+/**
+ *	disable_irq - disable an irq and wait for completion
+ *	@irq: Interrupt to disable
+ *
+ *	Disable the selected interrupt line.  Enables and Disables are
+ *	nested.
+ *	This function waits for any pending IRQ handlers for this interrupt
+ *	to complete before returning. If you use this function while
+ *	holding a resource the IRQ handler may need you will deadlock.
+ *
+ *	This function may be called - with care - from IRQ context.
+ */
+void disable_irq(unsigned int irq)  屏蔽指定中断
+
+/**
+ *	disable_irq_nosync - disable an irq without waiting
+ *	@irq: Interrupt to disable
+ *
+ *	Disable the selected interrupt line.  Disables and Enables are
+ *	nested.
+ *	Unlike disable_irq(), this function does not ensure existing
+ *	instances of the IRQ handler have completed before returning.
+ *
+ *	This function may be called from IRQ context.
+ */
+void disable_irq_nosync(unsigned int irq)  屏蔽指定中断,但是他立即返回,不等待可能正在执行的中断处理程序
+
+static void __enable_irq(struct irq_desc *desc, unsigned int irq) 开启指定中断
+
+本CPU全部中断:
+	local_irq_save()
+	local_irq_restore()
+	local_irq_enable()
+	local_irq_disable()
+
+  4. 底半部机制
+     在Linux系统中实现底半部的机制主要有 tasklet, 工作队列, 软中断
+     4.1 tasklet
+       include/linux/interrupt.h
+       #define DECLARE_TASKLET(name, func, data) \
+          struct tasklet_struct name = { NULL, 0, ATOMIC_INIT(0), func, data }
+
+       #define DECLARE_TASKLET_DISABLED(name, func, data) \
+          struct tasklet_struct name = { NULL, 0, ATOMIC_INIT(1), func, data }
+
+       tasklet处理函数:
+	void tasklet_func(unsigned long data);
+       tasklet调用:
+        void tasklet_schedule(struct tasklet_struct *taskletname)
+  
+    4.2 工作队列
+       work queue 是Linux内核中将工作推后执行的一种机制. 这种机制和tasklet不同之处在于他是把推后的工作
+       交由一个内核线程去执行, 因此工作队列的优势在于它允许重新调度甚至睡眠.
+       4.2.1 work_struct 数据结构
+          在2.6.0~2.6.19 中
+	  		 struct work_struct{
+			 	unsigned long pending;
+				struct list_head entry;
+				void (*func)(void *);
+				void *data;
+				void *wq_data;
+				struct timer_list timer;
+			 };
+	 在2.6.20之后:
+	 include/linux/workqueue.h 中定义
+	  struct work_struct{
+			 	atomic_long_t data;
+				struct list_head entry;
+				work_func_t func;
+				...
+			 };
+	  typedef void (*work_funct_t)(struct work_struct *work);
+	  
+	  4.2.2 工作队列操作
+	  DECLARE_WORK
+	  DECLARE_DELAYED_WORK
+	  INIT_WORK
+	  INIT_DELAYED_WORK
+	  schedule_work()
+	  schedule_delayed_work()
+	  create_workqueue()
+	  queue_work()
+	  queue_delayed_work()
+
+    5. 软中断
+       软中断使用软件方式来模拟硬件中断的概念
+       tasklet就是基于软中断来实现的.

@@ -1,0 +1,20 @@
+ 
+ 说明：
+	本程序的串口输入，依靠的是irq中断来检测。每次按下键盘就会产生中断，然后CPU截获
+	该中断进行处理。
+
+	注意：如果键盘中断发生，但是我们不去调用串口的读函数get_s()去读取键盘输入的话，
+	那么CPU会禁止下一次中断的发生，所以我们要循环的不断的读取。
+
+
+	原来我们采用的方法是：没有开启CPU对串口中断的支持，而是通过循环读取串口输出寄存器
+	来获得输入的同样也可以成功，因为我们先检测 UTRSTAT0 [0] 直到有数据可读时我们再读取：
+	P1096  P1103
+	char get_c(void)
+	{
+	volatile unsigned int *stat=(unsigned int *)UTRSTAT0;
+	while(!((*stat) & 0x1));
+	volatile unsigned int *urx=(unsigned int *)URX0;
+	return (char)*urx;
+	}	
+	

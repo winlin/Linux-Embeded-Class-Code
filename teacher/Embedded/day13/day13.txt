@@ -1,0 +1,250 @@
+轮询设备操作
+    1. 系统调用和驱动内设备操作
+	应用程序	驱动
+	open		open
+	close		release
+	read		read
+	write		write
+	ioctl		ioctl
+	lseek/llseek	llseek
+	select/poll	poll
+    2. select系统调用
+	用于多路监控，当没有一个文件满足要求时，select调用将引起进程阻塞。
+    3. poll操作
+	unsigned int (*poll)(struct file *filp, struct poll_table_struct *wait);
+	unsigned int (*poll)(struct file *filp, poll_table *wait);
+	    filp:文件指针
+	    wait:轮询表指针
+	轮询操作任务：
+	    a). 使用poll_wait()将等待队列添加到poll_table;
+	    b). 返回描述设备是否可读或可写的掩码
+    4. poll_table
+	在内核源代码include/linux/poll.h中定义
+	typedef struct poll_table_struct {
+	    poll_queue_proc qproc;
+	} poll_table;
+    5. poll_wait()函数
+	在内核源代码include/linux/poll.h中定义
+	void poll_wait(struct file *filp, wait_queue_head_t *wait_address, poll_table *p);
+	该函数不会引起阻塞，它仅仅将当前进程添加到wait参数指定的等待列表(poll_table)中。
+    6. poll函数返回值
+	通常返回下列定义"或"的结果
+	    POLLIN	设备可无阻塞读
+	    POLLOUT	设备可无阻塞写
+	    POLLRDNORM	数据可读
+	    POLLWRNORM	数据可写
+	设备可读通常返回：(POLLIN | POLLRDNORM)
+	设备可写通常返回：
+(POLLOUT | POLLWRNORM)
+    7. poll操作一般结构
+	unsigned int xxx_poll(...)
+	{
+	    unsigned int mask = 0;
+	    ...
+	    // 调用poll_wait()把进程添加到轮询表
+	    ...
+	    if(device is ready for read ) {
+		mask = POLLIN | POLLRDNORM;
+	    }
+	    if(device is ready for write {
+		mask = POLLOUT | POLLWRNORM;
+	    }
+	    ...
+	    return mask;
+	}
+
+
+异步通知
+    1. 概念
+	阻塞：设备未就绪则阻塞进程
+	非阻塞：设备未就绪则直接返回状态
+	轮询：由应用程序通过查询状态判断设备是否就绪
+	异步：一旦设备就绪，主动通知应用程序
+    2. 信号
+	在Linux系统中，异步通知使用信号来实现
+	在内核源代码arch/arm/include/asm/signal.h中定义
+	除SIGSTOP和SIGKILL这两个信号外，进程能够忽略或捕获其它所有信号。
+	如果一个信号没有被进程捕获，内核将采用默认行为处理。
+    3. 应用程序信号处理
+    4. 驱动程序信号处理
+	设备驱动程序中应该增加信号释放的相关处理。
+	4.1 支持F_SETOWN命令处理
+	    在控制命令中需要将filp->f_owner设置为对应进程ID。这个任务由内核完成。
+	4.2 支持F_SETFL命令处理
+	    每当FASYNC标志改变时，驱动中的fasync()函数将得以执行，所以，驱动程序中应该实现fasync()函数。
+	4.3 释放信号
+	    在驱动通过调用kill_fasync()函数释放相应信号。
+	4.4 faysnc_struct数据结构
+	    在内核源代码include/linux/fs.h中定义
+	    常见用法：在驱动数据结构中包含fasync_struct数据结构指针成员。
+	    struct xxx_cdev {
+		...
+		struct fasync_struct *async_queue;
+	    };
+	4.5 fasync()函数
+	   在file_operations数据结构中定义
+	   int (*fasync)(int fd, struct file *filp, int mode);
+	   常见实现：
+	    static int xxx_fasync(int fd, struct file *filp, int mode)
+	    {
+		struct xxx_cdev *dev = filp->private_data;
+
+		return fasync_helper( fd, filp, mode, &dev->async_queue );
+	    }
+	4.6 kill_fasync()函数
+	    在设备资源可以获得时，应该调用该函数释放SIGIO信号。可读时为POLL_IN；可写时为POLL_OUT。
+	    在内核源代码fs/fcntl.c中实现：
+	    void kill_fasync(struct fasync_struct **fp, int sig, int band);
+	    常见实现：
+		static ssize_t xxx_write(...)
+		{
+		    struct xxx_cdev *dev = filp->private_data;
+
+		    ...
+		    if( dev->async_queue ) {
+			kill_fasync( &dev->async_queue, SIGIO, POLL_IN );
+		    }
+		    ...
+		}
+	4.7 删除异步通知
+	    在文件关闭时，应该调用驱动的fasync函数将文件从异步通知列表中删除。
+	    常见实现：
+	    static int xxx_release(...)
+	    {
+		...
+		xxx_fasync( -1, filp, 0 );
+		...
+	    }
+    5. 发起者是谁
+	当一个进程收到SIGIO，它不知道是哪个文件有新数据提供。
+	如果多于一个文件被使能异步通知挂起输入的进程，应用程序必须仍然依靠select()来找出具体是哪个文件发生变化。
+
+异步I/O
+
+
+中断和定时器
+
+中断
+    1. 定义
+    2. 分类
+	2.1 按来源分类
+	2.2 按是否可以屏蔽分类
+	2.3 按入口方法分类
+	    向量中断
+	    非向量中断：多个中端共享一个入口地址，由软件通过中断标志来识别具体是哪个中断
+
+硬件定时器
+
+Linux中断处理程序结构
+    1. 在Linux系统中中断处理程序分解为两个半部：顶半部(Top Half)和底半部(Bottom Half)
+	顶半部：完成尽可能少的比较紧急的功能，往往只是简单的读取寄存器的中断状态并清除中断标志后就进行“登记中断”的工作，也就是将底半部处理程序挂在该设备的底半部执行队列中去，该过程不可中断。
+	底半部：它将完成中断事件的绝大多数任务，该部分任务不是非常紧急，并且相对比较耗时，该部分可以被新的中断打断。
+    2. 中断申请和释放
+	在内核源代码kernel/irq/manage.c中实现
+	2.1 申请IRQ
+	    int request_irq(unsigned int irq, irq_handler_t handler, unsigned long irqflags, const char *name, void *dev_id);
+		irq:待申请的中断号
+		handler:待注册的中断处理函数
+		irqflags:中断标志
+		    IRQF_SHARED: 表示多个设备共享中断
+IRQF_SAMPLE_RANDOM:用于随机数种子的随机采样
+IRQF_TRIGGER_RISING: 上升沿触发
+IRQF_TRIGGER_FAILING: 下降沿触发
+		name: 中断设备的名称
+		dev_id:传递给中断处理函数的指针，通常用于共享中断时传递设备结构体
+		返回值：成功返回0，失败返回负值
+		    -EINVAL:表示申请的中断号无效或者中断处理函数指针为空
+		    -EBUSY:表示中断已经被占用并且不能共享
+	2.2释放IRQ:
+	    void free_irq(unsigned int irq, void *dev_id);
+		irq: 待释放的中断号
+		dev_id:传递给中断处理函数的指针
+    3. 使能和屏蔽中断
+	3.1 屏蔽特定中断
+	    在内核源代码kernel/irq/manage.c中实现
+	    void disable_irq(unsigned int irq);
+		屏蔽irq指定的中断
+	    void disable_irq_nosync(unsigned int irq);
+		屏蔽irq指定的中断，该函数立即返回，不等待可能正在执行的中断处理程序
+	    void enable_irq(unsigned int irq);
+	3.2 本CPU全部中断
+	    local_irq_save()
+	    local_irq_restore()
+	    local_irq_enable()
+	    local_irq_disable()
+    4. 底半部机制
+	在Linux系统中实现底半部的机制主要有tasklet、工作队列、软中断
+	4.1 tasklet
+	    在内核源代码include/linux/interrupt.h中定义
+	    4.1.1 tasklet定义
+		DECALRE_TASKLET(taskletname, tasklet_func, data);
+		taskletname: 待定义的tasklet名称
+		tasklet_func: tasklet处理函数
+		data:待传入tasklet处理函数的参数
+	    4.1.2 tasklet处理函数
+		void tasklet_func(unsigned long data);
+	    4.1.3 tasklet调用
+		void tasklet_schedule(struct tasklet_struct *taskletname);
+	4.2 工作队列
+	    工作队列(work queue)是Linux内核中将工作推后执行的一种机制。这种机制和BH和tasklet不同之处在于它是把推后的工作交由一个内核线程去执行，因此工作队列的优势在于它允许重新调度甚至睡眠。
+	     4.2.1 work_struct数据结构
+		在内核源代码2.6.0~2.6.19中
+		struct work_struct {
+		    unsigned long pending;
+		    struct list_head entry;
+		    void (*func)(void *);
+		    void *data;
+		    void *wq_data;
+		    struct timer_list timer;
+		};
+	    在内核代码2.6.20之后
+		在内核源代码include/linux/workqueue.h中定义(2.6.28.6)
+		struct work_struct {
+		    atomic_long_t data;
+		    struct list_head entry;
+		    work_func_t func;
+		    ...
+		};
+		typedef void (*work_funct_t)(struct work_struct *work);
+		struct delayed_work {
+		    struct work_struct work;
+		    struct timer_list timer;
+		};
+	    4.2.2 工作队列操作
+		DECLARE_WORK
+		DECLARE_DELAYED_WORK
+		INIT_WORK
+		INIT_DELAYED_WORK
+		schedule_work
+		schedule_delayed_work
+		create_workqueue
+		queue_work
+		queue_delayed_work
+		flush_schedule_work
+		flush_workqueue
+		cancel_delayed_work
+		destroy_workqueue
+	    4.2.3 简单示例
+		struct my_struct_t {
+		char *name;
+		struct work_struct my_work;
+	    };
+
+	    void my_func(struct work_struct *work)
+	    {
+		struct my_struct *my_name = container_of(work, struct my_struct_t, my_work);
+		...
+	    }
+
+	    struct workqueue_struct *my_wq = create_workqueue("my_workqueue");
+	    struct my_struct_t my_name;
+	    my_name.name = "my work struct name";
+	    INIT_WORK( &(my_name.my_work), my_func);
+	    queue_work( my_wq, &my_name );
+
+	    destroy_workqueue(my_wq);
+	4.3 软中断
+	    软中断是用软件方式来模拟硬件中断的概念。
+	    tasklet就是基于软中断来实现的。
+
+

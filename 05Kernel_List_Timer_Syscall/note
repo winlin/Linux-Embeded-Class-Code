@@ -1,0 +1,308 @@
+--------------------------------------------------------------------------------
+内核链表
+	在Linux内核中大量使用链表数据结构.
+	include/linux/list.h 中定义
+	在实际使用中,它通常被组织成双向循环连表.
+	struct list_head{
+	       struct list_head *next, *prev;
+ 	}
+	注意,其中不包含数据域.	
+
+	include/linux/kernel.h    container_of()
+	include/linux/stddef.h    offsetof()
+	#define offset(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+	/**
+	 * container_of - cast a member of a structure out to the containing structure
+	 * @ptr:	the pointer to the member.
+	 * @type:	the type of the container struct this is embedded in.
+	 * @member:	the name of the member within the struct.
+ 	 *
+ 	 */
+	 #define container_of(ptr, type, member) ({			\
+	     const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	     (type *)( (char *)__mptr - offsetof(type,member) );})
+
+	/**
+	 * list_entry - get the struct for this entry
+ 	 * @ptr:      the &struct list_head pointer.
+	 * @type:     the type of the struct this is embedded in.
+	 * @member:   the name of the list_struct within the struct.
+ 	 */
+	 #define list_entry(ptr, type, member) \
+	 	 container_of(ptr, type, member)
+	
+
+	arch/arm/include/asm/prefetch.h   prefetch()
+	prefetch()会强制CPU去预取指令,打断当前正在进行的操作,这样会提高
+	循环执行的速度,但是由于当前执行的指令被打断,CPU中原来的dcache和
+	icache没有被处理或者回写保存,有可能出现错误.
+	#define list_for_each(pos, head) \
+	for (pos = (head)->next; prefetch(pos->next), pos != (head); \
+            pos = pos->next)
+	
+	include/linux/poison.h		 LIST_POSTION1 / LIST_POSTION2
+	LIST_POSTION1/2 这两个虚拟地址是永远不会使用的,所以一旦访问就会出现
+	错误.
+	
+	static inline void list_del(struct list_head *entry)
+	{
+	__list_del(entry->prev, entry->next);
+	entry->next = LIST_POISON1;
+	entry->prev = LIST_POISON2;
+	}
+
+	注意:
+	list_for_each() 不能用于循环删除该链表,因为它会prefetch(pos->next),而我们已经
+	在循环里面调用list_del(pos),这时的pos->next=LIST_POSTION1;pos->prev=LIST_POSTION2.
+	这两个地址都是不使用的虚拟地址,进行prefetch()当然会出现错误.所以,综上可知
+	list_for_each()只能用于对于链表的指针没有修改的遍历,或者说用于"只读"的遍历链表.
+
+	list_for_each_safe() 由于 n 总是指向pos的下一个节点,所以不会出现访问非法地址的问题.
+	所以,通用使用该函数对链表进行遍历.
+	
+--------------------------------------------------------------------------------
+内核定时器
+	1.时钟中断
+	  由系统的定时硬件以周期性的时间间隔发生,这个间隔(也就是频率)由内核根据HZ来确定.
+	2.HZ
+	  它是一个与体系结构无关的常数,可以配置在50-1200之间.
+	3.tick
+	  它是HZ的倒数
+	4.jiffies
+	  它是Linux核心变数(32bit,unsigned long),它被用来记录系统自开机以来,已经经过多少个
+	  tick.
+	5.如果我们的定时精度不高的话,可以直接用jiffies来延时.
+	   unsigned long waittime=jiffies+delay_seconds*HZ 
+	   while(jiffies < waittime){};
+	6.定时器的作用
+	   它由用户控制某个函数(定时器函数)在未来的某个时刻进行.
+	   在Linux系统中,内核定时器注册的处理函数只执行一次(不是循环执行).
+	7.内核定时器定以为一个双向链表
+		include/linux/timer.h
+	----------------------------------------
+	  struct timer_list {
+	  struct list_head entry;  //内核使用
+	  unsigned long expires;   //超时时候的jiffies的值
+
+	  void (*function)(unsigned long);  //超时处理函数
+	  unsigned long data;    //设定传递给定时处理函数的参数
+
+	  struct tvec_base *base;  //内核使用,确定运行等级
+	  #ifdef CONFIG_TIMER_STATS
+       	  void *start_site;
+       	  char start_comm[16];
+       	  int start_pid;
+	  #endif
+	  };
+	  
+       8.内核定时器操作函数
+	 include/linux/timer.h
+	  8.1 初始化
+	      void init_timer(struct timer_list *timer);
+	  8.2 启动定时器
+	      void add_timer(struct timer_list *timer);
+	  8.3 删除定时器
+	      void del_timer(struct timer_list *timer);
+	      在定时器超时之前删除定时器.实际上,在定时器超时之后,系统会自动将定时器删除.
+      9.其他
+	klist 内核中真正经常使用的链表结构 include/linux/klist.h
+
+--------------------------------------------------------------------------------
+进程控制:
+	1.进程四要素
+	   进程代码
+	   进程私有堆栈
+	   task_struct
+	   进程私有的进程地址空间 (线程没有自己的地址空间)	
+
+	2.可以根据线程是否具有地址空间来判断线程是否属于内核线程
+
+	3.task_struct
+	  include/linux/sched.h  1074_Hang
+	  
+	  struct task_struct{
+	  	 pid_t pid;  
+		 volatile long state;  //进程状态
+		 int exit_state;  //进程退出状态
+		 struct mm_struct *mm; //进程用户空间描述指针,对于内核线程该指针为空
+		 unsigned int policy;  //进程调度策略
+		 int prio;  //进程优先级
+		 int static_prio;  //进程静态优先级
+		 struct sched_rt_entity rt; //进程实时调度实体
+		 struct task_struct *real_parent; //真实的父进程
+		 struct task_struct *parent; //对于信号SIGCHILD,wait4()等报告的接受容器
+		 char comm[TASK_COMM_LEN]; //不包含路径的执行程序的名称
+		 ......
+	  };
+	  
+	  3.2 进程状态
+	       TASK_RUNNING :进程创建时的状态,相当于就绪态
+	       TASK_INTERRUPTIBLE :可以被其他信号或正等待的条件唤醒
+	       TASK_UNINTERRUPTIBLE :只可以被等待条件唤醒
+	       TASK_STOPPED  :程序处于暂停的状态
+	       TASK_KILLABLE :收到 SIGKILL
+	       TASK_TRACED   :程序处于调试状态
+	       TASK_DEAD     :程序在调用exit()到do_exit()期间
+	       
+         3.3 进程退出状态
+	      EXIT_ZOMBIE
+	      EXIT_DEAD
+	      
+	 3.4 进程优先级
+	     数值越大,优先级越低
+	     取值范围: 0---(MAX_PRIO-1)  //0--139
+	     其中: 0--(MAX_RT_PRIO-1) 为实时进程
+	     	   (MAX_RT_PRIO)--(MAX_PRIO-1) 为非实时进程
+	     
+	     #define MAX_RT_PRIO  100
+	     #define MAX_RT_PRIT  MAX_USR_RT_PRIO
+	     #define MAX_PRIO     (MAX_RT_PRIT+40)
+	     #define DEFAULT_PRIO (MAX_RT_PRIO+20)
+	     
+	  3.5 进程静态优先级
+	     数值越大,优先级越低
+	     它决定进程初始时间片的大小
+	     实时进程该值不参与优先级运算.
+
+	  3.6 时间片
+	      rt->timer_slice    
+	      内核将100-139的优先级线性映射到200ms-10ms的时间片上,优先级数值越大,
+	      时间片越小.
+	  3.7 current指针
+	      它始终指向当前正在运行的进程的task_struct结构体对象.      
+	      进程可以通过current指针来访问本身的task_struct,并修改相应的数据项.
+
+	  3.8 进程的创建
+		kfork()
+	  3.9 进程的销毁    	    
+	      	do_exit()		    
+     
+          4.1 进程的调度
+	       从准备就绪的进程当中,采用一定的规则来选出最合适的一个来执行.
+	  4.2 调用策略
+	       SCHED_NORMAL
+	       SCHED_FIFO
+	       SCHED_RR
+	       SCHED_BATCH
+	       SCHED_IDLE
+     	     
+	 4.3 调度时机 schedule()
+	      1. 主动式
+	      	  在内核中直接调用 schedule() 函数.当进程需要等待资源而暂时停止运行时,
+		  会把状态设置为挂起(睡眠),并主动被请求被调度,让出CPU.
+		  示例:
+		    current->state=TASK_INTERRUPTABLE;
+		    schedule();
+	      2. 被动式
+	      	    1.用户抢占
+			进行调用系统 或者 系统中断返回过程中被其他用户程序中断.
+
+		    2.内核抢占
+			发生在内核内部.
+			有一个调度标志:TIF_NEED_RESCHED
+			不可中断的情况:
+			    TOP Half / Bottom Half 中断上下文
+			    自旋锁
+			    正在执行schedule()
+	     3. 调度步骤
+	     	 schedule()函数工作流程:
+		  1. 清理当前运行中的进程
+		  2. 选择下一个要运行的进程
+		  3. 为新进程设置环境
+		  4. 进程上下文切换
+--------------------------------------------------------------------------------
+系统调用:
+	1.定义
+	  系统调用是Linux内核中设置的一组用于实现各种功能的子程序.
+	  在Linux2.6.28.6中大约有360个系统调用.一般在内核代码:
+	  arch/arm/include/asm/unistd.h
+	2.系统调用和普通函数的区别
+	3. libc 是标准库的实现
+	4. 新增系统调用
+	   1.进程控制
+	   2.文件系统
+	   3.系统控制
+	   4.内存管理
+	   5.网络管理
+	   6.socket控制
+	   7.用户管理
+	   8.进程间通讯
+	      1.信号
+	      2.消息
+	      3.管道
+	      4.信号量
+	      5.共享内存
+	      
+增加一个新的系统调用:
+vim  arch/arm/include/asm/unistd.h
+  在定义的最后添加一行:
+     #define __NR_mymulti      (__NR_SYSCALL_BASE+361)
+(unistd.h:包含了各个系统调用的调用号)
+
+vim  arch/arm/kernel/calls.S 
+  在定义的最后添加一行:
+         CALL(sys_mymulti)
+( calls.S:This file is included thrice in entry-common.S)
+
+vim arch/arm/kernel/entry-common.S 
+(/*
+ * This is the fast syscall return path.  We do as little as
+ * possible here, and this includes saving r0 back into the SVC
+ * stack.
+ */
+)
+
+vim kernel/sys.c 	
+添加:
+	SYSCALL_DEFINE2(mymulti,int,x,int,y)
+	{
+		return (x*y);
+	}
+        其中的SYSCALL_DEFINE2中的2代表 有两个参数.
+	SYSCALL_DEFINE是一个宏定义,展开以后会自动确定返回类型.
+  
+   SYSCALL_DEFINEx()的定义在文件 include/linux/syscalls.h 
+   117 #define SYSCALL_DEFINE(name) static inline long SYSC_##name
+   118 #define SYSCALL_DEFINEx(x, name, ...)                                   \
+   119         asmlinkage long sys##name(__SC_DECL##x(__VA_ARGS__));           \
+   120         static inline long SYSC##name(__SC_DECL##x(__VA_ARGS__));       \
+   121         asmlinkage long SyS##name(__SC_LONG##x(__VA_ARGS__))            \
+   122         {                                                               \
+   123                 __SC_TEST##x(__VA_ARGS__);                              \
+   124                 return (long) SYSC##name(__SC_CAST##x(__VA_ARGS__));    \
+   125         }                                                               \
+   126         SYSCALL_ALIAS(sys##name, SyS##name);                            \
+   127         static inline long SYSC##name(__SC_DECL##x(__VA_ARGS__))
+ 
+================================================================================
+下面是一段关于prefetch的介绍:
+/*
+	prefetch(x) attempts to pre-emptively get the memory pointed to
+	by address "x" into the CPU L1 cache. 
+	prefetch(x) should not cause any kind of exception, prefetch(0) is
+	specifically ok.
+
+	prefetch() should be defined by the architecture, if not, the 
+	#define below provides a no-op define.		  
+	
+	There are 3 prefetch() macros:
+	
+	prefetch(x)	- prefetches the cacheline at "x" for read
+	prefetchw(x)	- prefetches the cacheline at "x" for write
+	spin_lock_prefetch(x) - prefetches the spinlock *x for taking
+	
+	there is also PREFETCH_STRIDE which is the architecure-prefered 
+	"lookahead" size for prefetching streamed operations.
+	
+*/
+  arch/arm/include/asm/processor.h
+
+  #define ARCH_HAS_PREFETCH
+  static inline void prefetch(const void *ptr)
+  {
+        __asm__ __volatile__(
+                "pld\t%a0"      //预取指汇编调用"
+                :
+                : "p" (ptr)
+                : "cc");
+  }

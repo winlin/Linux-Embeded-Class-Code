@@ -1,0 +1,60 @@
+手动创建设备文件
+脚本创建设备文件
+
+
+自动创建设备文件
+    1.手动创建设备文件
+	不管是直接使用命令还是使用脚本，其实质都是调用mknod命令来创建设备文件。
+    2.自动创建设备文件
+	实际上在内核中提供了一组函数，可以用来在模块加载的时候在/dev下创建相应的设备节点，并在模块卸载时删除该设备节点。
+	前提条件：用户空间移植了udev,或者在使用busybox的嵌入式系统中已经使能busybox内嵌的mdev。
+	2.1 class和device结构体
+	    在内核源代码include/linux/device.h中定义
+	    class:该结构体类型变量对应一个设备类，被创建的类存放在/sys目录下面
+	    device:该结构体类型变量对应一个设备，被创建的设备存放在/sys目录下面
+	    在加载模块时，用户空间的udev为自动响应device_create()函数，在/sys目录下面寻找相应的类，从而为这个设备在/dev目录下创建设备节点。
+	2.2 版本问题
+	    2.2.1 在内核2.4版本中使用devfs_register
+	    2.2.2 在内核2.6早期版本中class_device_register
+	    2.2.3 现在使用class_create和device_create
+	2.3 创建和注销类
+	    在内核源代码include/linux/device.h中定义
+	    在内核源代码driver/base/class.c中实现
+	    2.3.1 class_create函数，为驱动创建一个设备类
+		struct class *class_create(owner, name);
+		owner:待创建设备类的模块拥有者
+		name:待创建设备类的名称
+		返回值：创建好的设备类的指针
+	    2.3.2 class_destroy函数，销毁驱动对应的设备类
+		void class_destroy(struct class *cls);
+		cls: 待销毁的设备类
+	2.4 创建和销毁设备
+	    它们是内核模块导出符号，在内核源代码drivers/base/core.c中实现
+	    2.4.1 device_create函数，为每个设备创建对应的设备节点
+		struct device *device_create(struct class *class, struct device *parent, dev_t devt, void *drvdata, const char *fmt, ...);
+		class:待创建的设备所属设备类
+		parent:指向可能存在的父设备的指针
+		devt:设备号
+		drvdata:设备私有数据指针
+		fmt:待创建的设备文件名称
+		返回值：创建好的设备的指针
+	    2.4.2 device_destroy函数，删除每个设备对应的设备节点
+		void device_destory(struct class *class, dev_t devt);
+		class:待销毁的设备所属的设备类
+		devt:待销毁的设备的设备号(主设备号和次设备号)
+
+
+cdev改进
+
+多设备个体处理
+
+
+
+
+
+
+
+
+
+
+

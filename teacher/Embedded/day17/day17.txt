@@ -1,0 +1,383 @@
+
+类(Class)
+    1. class数据结构
+	在内核源代码include/linux/device.h中定义
+	struct class {
+	    const char *name; //类名称
+	    struct module *owner; // 类的模块拥有者
+
+	    struct class_attribute *class_attr; //类属性
+	    struct device_attribute *dev_attrs; //设备属性
+	    struct kobject *dev_kobj; // 类对象
+
+	    int (*dev_uevent)(str device *dev, struct kobj_uevent_env *env);
+
+	    void (*class_release)(struct class *class);
+	    void (*dev_release)(struct device *dev);
+
+	    int (*suspend)(struct device *dev, pm_message_t state);
+	    int (*resume)(struct device *dev);
+
+	    struct pm_ops *pm;
+	    struct class_private *p;
+	};
+    2. 类操作
+	2.1 类生成并注册
+	    class_create
+	2.2 类销毁
+	    class_destroy
+    3. class_private数据结构
+	在内核源代码drivers/base/base.h中定义
+	struct class_private {
+	    struct kset class_subsys;
+	    struct klist class_devices;
+	    struct list_head class_interface;
+	    struct kset class_dirs;
+	    struct mutex class_mutex;
+	    struct class *class;
+	};
+    4. class_attribute数据结构
+	在内核源代码include/linux/device.h中定义
+	struct class_attribute {
+	    struct attribute attr;
+	    ssize_t (*show)(...);
+	    ssize_t (*store)(...);
+	};
+    5. CLASS_ATTR宏
+	在内核源代码include/linux/device.h中定义
+	#define CLASS_ATTR(_name, _mode, _show, _store) struct class_attribute class_attr_##_name = __ATTR(_name, _mode, _show, _store)
+
+
+
+Platform总线
+
+
+
+块设备
+    1.块设备驱动注册与注销
+	在内核源代码include/linux/fs.h中定义
+	在内核源代码block/genhd.c中实现
+	1.1 块设备注册
+	    int register_blkdev(unsigned int major, const char *name);
+	    major:块设备号，如果为0，内核分配一个新的主设备号 
+	    name: 块设备名称
+	    返回值：如果major不为0，成功返回0，失败返回负值
+		    如果major为0，返回系统自动分配的主设备号
+	1.2 块设备注销
+	    void unregister_blkdev(unsigned int major, const char *name);
+    2. 块设备相关数据结构
+	2.1 block_device_operations数据结构
+	    在内核源代码include/linux/blkdev.h中定义
+	    struct block_device_operations {
+		int (*open)(...);
+		int (*release)(...);
+		int (*locked_ioctl)(...);
+		int (*ioctl)(...);
+		int (*compat_ioctl)(...);
+		int (*direct_access)(...);
+		int (*media_changed)(...);
+		int (*revalidate_disk)(...);
+		int (*getgeo)(...);
+		struct module *owner;
+	    };
+	2.2 block_device数据结构
+	    在内核源代码include/linux/fs.h中定义
+	2.3 gendisk数据结构
+	    在内核源代码include/linux/genhd.h中定义
+	    struct gendisk {
+		int major; //主设备号
+		int first_minor; // 起始次设备号
+		int minors; // 次设备数据
+		char disk_name[ DISK_NAME_LEN ]; //磁盘名称
+
+		struct disk_part_tbl *part_tbl; //分区表
+		struct hd_struct part0;
+
+		struct block_device_operations *fops; //块设备操作集合
+		struct request_queue *queue; //块设备请求队列
+		void *private_data; //私有数据
+		...
+	    };
+	2.4 request数据结构
+	    在内核源代码include/linux/blkdev.h中定义
+	    struct request {
+		struct list_head queuelist; // 请求队列操作链表
+		...
+		struct request_queue *q; //该请求所属请求队列
+		...
+		sector_t sector; //待传输的下一个扇区
+		sector_t hard_sector; //待完成的下一个扇区
+		unsigned long nr_sectors; //待传输的扇区数
+		unsigned long hard_nr_sectors; //待完成的扇区数
+		unsigned int current_nr_sectors; //当前I/O操作中待传输的扇区数
+		unsigned int hard_cur_sectors; //当前I/O操作中待完成的扇区数
+		struct bio *bio; // 请求的bio结构体指针
+		struct bio *biotail; //请求的bio结构体指针(尾部)
+		...
+		unsigned short nr_phys_segments; //请求在内存中占据的不连续的段的数目
+		...
+		char *buffer; //传输数据缓冲区指针(内核虚拟地址)
+		...
+		int ref_count; //请求引用计数
+		...
+	    };
+	2.5 bio数据结构
+	    在内核源代码include/linux/bio.h中定义
+	    struct bio {
+		sector_t bi_sector; // 该bio要操作的起始扇区
+		...
+		unsigned long bi_flags; //描述bio的标志，最低位为读写标志，被置位表示写请求。可以使用bio_data_dir(bio)宏来获取读写方向。
+		...
+		unsigned int bi_phys_segments; //该bio操作的物理段的数目
+		unsigned int bi_size; //被传输的数据大小(按字节计算)，可以通过bio_sectors(bio)来获取以扇区为单位的大小
+		...
+		struct bio_vec *bi_io_vec; //该bio处理的真实的向量
+		...
+	    };
+	2.6 bio_vec数据结构
+	     在内核源代码include/linux/bio.h中定义
+	    struct bio_vec {
+		struct page *bv_page; //页指针
+		unsigned int bv_len; //待传输的字节数
+		unsigned int bv_offset; //偏移地址
+	    };
+	2.7 request_queue数据结构
+	    在内核源代码include/linux/blkdev.h中定义
+	    struct request_queue {
+		...
+		unsigned long nr_request; //最大请求数量
+		...
+		unsigned int max_sectors; //最大扇区数
+		...
+		unsigned int max_phys_segments; //最大段数
+		...
+		unsigned short hardsect_size; //硬件扇区尺寸
+		unsigned int max_segment_size; //最大段边界
+		unsigned long seg_boundary_mask; //段边界掩码
+		...
+		unsigned int dma_alignmnet; //DMA传送的内存对齐限制
+		...
+	    };
+	2.8 hd_geometry数据结构
+	    在内核源代码include/linux/hdreg.h中定义
+	    struct hd_geometry {
+		unsigned char heads;
+		unsigned char sectors;
+		unsigned short cylinders;
+		unsigned long start;
+	    };
+    3. gendisk操作
+	在内核源代码include/linux/genhd.h中定义
+	在内核源代码block/genhd.c中实现
+	del_gendisk在内核源代码fs/partitions/check.c中实现
+	3.1 alloc_disk操作
+	    该函数分配一个gendisk结构体，并返回指针
+	    struct gendisk *alloc_gendisk(int minors);
+	    minors: 该设备使用次设备的数目，一般就是指分区数目。该值设定后不能修改。
+	3.2 add_disk操作
+	    该函数应该在磁盘准备好可以被操作之后再调用。
+	    void add_disk(struct gendisk *disk);
+	3.3 del_gendisk操作
+	    void del_gendisk(struct gendisk *disk);
+	3.4 get/set_capacity操作
+	    sector_t get_capacity(struct gendisk *disk);
+		disk: 待操作的磁盘
+		返回值：磁盘容量(实际是扇区数)
+	    void set_capacity(struct gendisk *disk, sector_t size);
+	3.5 get/put_disk操作
+	    这个两个操作用来操作引用计数，驱动应该是从来不需要调用它们。
+	    实际上，通常对于del_gendisk操作的调用去掉了最后一个gendisk的最终引用，但是不保证这样。
+	    struct kobject *get_disk(struct gendisk *disk);
+	    void put_disk(struct gendisk *disk);
+    4. bio操作宏和函数
+	在内核源代码include/linux/bio.h定义
+	bio_data_dir在内核源代码include/linux/fs.h中定义
+	4.1 bio_data_dir宏
+	    获取数据传输方向
+	    unsigned long bio_data_dir(struct bio *bio);
+		返回值：0为读，1为写
+	4.2 bio_page宏
+	    获取当前页指针
+	    struct page *bio_page(struct bio *bio);
+	4.3 bio_offset宏
+	    获取页内的被传输数据的偏移
+	4.4 bio_cur_sectors宏
+	    获取当前传输的扇区数
+	4.5 bio_data函数
+	    获取数据缓冲区的内核虚拟地址。该地址仅在请求的页不在高端内存中时可用，其它情况会产生错误。也就是说，如果已经使用blk_queue_bounce_limit()改变设置，不能调用该函数。
+	    void *bio_data(struct bio *bio);
+	4.6 bio_kmap/kunmap_irq宏
+	    用于获取任何情况下的数据缓冲区内核虚拟地址。不管该数据是否位于高端内存或低端内存。它们的使用必须成对使用。
+	    使用限制：
+		a). 由于使用原子kmap，在操作期间不能睡眠
+		b). 同理，不能一次映射多与一个段
+	    char *bio_kmap_irq(struct bio *bio, unsigned long *flags);
+	    void bio_kunmap_irq(struct bio *bio, unsigned long *flags);
+	4.7 bio_for_each_segment宏
+	    #define bio_for_each_segment(bvl, bio, i) ...
+	    通常用例：
+		int segno;
+		struct bio_vec *vec;
+		bio_for_each_segment(vec, bio, segno)
+		{
+		    ...
+		}
+    5. request_queue操作
+	在内核源代码include/linux/blkdev.h中定义
+	实现分别在内核源代码block/bld-core.c elevator.c blk-settings.c中
+	内核源代码block目录下包含电梯调度算法相关队列处理函数。
+	5.1 blk_init_queue函数
+	    创建并初始化一个请求队列
+	    struct request_queue *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock);
+		rfn: 队列请求处理函数
+		lock:保护队列操作的锁
+		返回值：创建并初始化后的请求队列
+	5.2 blk_cleaup_queue函数
+	    清除请求队列中的请求
+	    void blk_cleaup_queue(struct request_queue *q);
+	5.3 blk_alloc_queue函数
+	    分配一个请求队列
+	    对应Flash、RAM Disk等完全随机访问的非机械设备，并不需要复杂的I/O调度。此时，可以使用该函数分配一个请求队列，并使用后面的blk_queue_make_request()函数来绑定请求队列和"制造请求"函数。
+	    struct request_queue *blk_alloc_queue(gfp_t gfp_mask);
+		gfp_mask: 分配请求队列结构体内存空间的内核内存分配标志。
+	5.4 blk_queue_make_request函数
+	    绑定请求队列和“制造”请求函数
+	    void blk_queue_make_request(struct request_queue *q, mak_request_fn *mfn);
+	5.5 elv_next_request函数
+	    使用电梯调度算法提取对列中的下一个请求。
+	    struct request *elv_next_request(struct request_queue *q);
+	5.6 blkdev_dequeue_request函数
+	    从请求队列中移除一个请求
+	    void blkdev_dequeue_request(struct request *req);
+	5.7 elv_requeue_request函数
+	    使用电梯调度算法归还一个请求到请求队列	
+	    void elv_requeue_request(struct request_queue *q, struct request *req);
+	5.8 blk_start/stop_queue函数
+	   启动/停止请求队列操作
+	   void blk_start_queue(struct request_queue *q);
+	   void blk_stop_queue(struct request_queue *q);
+	5.9 blk_queue_bounce_limit函数
+	5.10 blk_queue_max_*
+	    blk_queue_max_sectors()
+	    blk_queue_max_phys_segment()
+	     blk_queue_max_hw_segments()
+	    blk_queue_max_segment_size()
+	5.11 blk_queue_segment_boundary函数
+	5.12 blk_queu_dma_alignment函数
+	5.13 blk_queue_hardsect_size函数
+	    该函数告诉内核设备的硬件扇区大小。所有内核产生的请求是这个大小倍数并正确对齐。但是，所有块层和驱动之间的通讯仍然以512字节扇区方式来处理。
+    6. 块设备驱动模块操作
+	6.1模块加载
+	    块设备驱动模块加载函数通常完成如下任务：
+	    a). 注册块设备驱动
+	    b). 分配、初始化请求队列，绑定请求队列和请求函数
+	    c). 分配、初始化gendisk，给gendisk的major,fops,queue等成员赋值，最后将gendisk添加到内核
+	6.2 模块卸载
+	    块设备驱动模块卸载函数通常完成如下任务：
+	    a). 删除gendisk和对gendisk的引用
+	    b). 清除请求队列
+	    c). 删除对设备的引用，注销块设备驱动
+    7. 块设备操作函数
+	7.1 块设备打开与释放
+	    块设备的open()与release()操作并非必须，一个简单的块设备驱动可以不提供这个两个操作。
+	    open()函数和字符驱动的open()类似，都有inode和file结构体作为参数。当一个节点引用一个块设备时，inode->i_bdev->bd_disk包含一个指向关联gendisk结构体的指针。
+	    在一个真实的硬件设备的驱动中，open()和release()还应该设备驱动和硬件的状态，这些工作可能包含启停磁盘、加锁一个可移除设备和分配DMA缓冲等等。
+	7.2 块设备驱动ioctl操作
+	    通常，高层的块设备驱动代码已经处理了绝大多数ioctl。因此，具体的块设备驱动中通常不再需要实现很多ioctl命令。
+	7.3 块设备获取“磁盘物理结构”
+	    选择适当的物理结构信息填入到struct hd_genmetry结构体。
+	7.4 可移动介质操作
+	    media_changed()函数用于查看是否有介质已经改变；如果改变已经发生，它返回一个非零值。
+	    revalidate_disk()函数在介质被改变之后调用，它的任务是做任何可能需要的事情来准备驱动对新介质的操作。该函数被调用之后，内核试图重新读取分区表并且启动这个磁盘设备。
+
+网络设备驱动
+    1. 网络协议栈
+	OSI：7层
+	Linux：4层
+	    应用层：会话层、表示层、应用层
+	    传输层：传输层
+	    网际层：网络层
+	    网络接口：物理层、数据链路层
+    2. 网络接口层
+	Linux系统的网络接口层把数据链路层和物理层合并在一起，提供访问物理设备的驱动程序，对应的协议主要是以太网协议。
+    3. Linux网络子系统
+    4. 设备无关接口
+	4.1 驱动注册和注销
+	4.2 数据处理接口
+    5. 设备驱动
+	5.1 net_device结构体
+	    在内核源代码inlucde/linux/netdevice.h中定义
+	    struct net_device {
+		char name[IFNAMSIZ]; //设备名称
+		...
+		unsigned long state; //当前设备状态
+		...
+		unsigned long base_addr; //I/O基地址
+		...
+		unsigned int irq; //中断号
+		...
+		int (*init)(struct net_device *dev);
+		int (*open)(struct net_device *dev);
+		int (*stop)(struct net_device *dev);
+		int (*hard_start_xmit)(struct sk_buff *skb, struct net_device *dev);
+		...
+	    };
+	5.2 init操作
+	    设备初始化函数。在调用register_netdev时，由系统调用来完成net_device结构的初始化。
+	5.2 open操作
+	    打开接口
+	5.3 stop操作
+	    关闭接口
+	5.4 hard_start_xmit操作
+	    数据发送函数
+	5.5 net_device结构分配
+	    5.6.1 alloc_netdev宏
+		struct net_device *alloc_netdev(int sizeof_priv, const char *name, void (*setup)(struct net_device *dev));
+		sizeof_priv: 驱动私有数据区大小
+		name: 设备名称
+		setup:初始化函数
+	    5.6.2 alloc_etherdev宏
+		struct net_device *alloc_etherdev(int sizeof_priv);
+	5.7网络设备驱动注册与注销
+	    在内核源代码net/core/dev.c中实现
+	    5.7.1 注册
+		int register_netdev(struct net_device *dev);
+	    5.7.2 注销
+		void unregister_netdev(struct net_device *dev);
+	6. sk_buff结构体
+	    在内核源代码include/linux/skbuff.h中定义
+	    在内核源代码net/core/skbuff.c中实现
+	    6.1 sk_buff数据结构
+#typedef unsigned char * sk_buff_data_t
+		struct sk_buff {
+		    struct device *dev; //处理该包的设备
+		    ...
+		    __u32 saddr; // IP源地址
+		    __u32 daddr; // IP目的地址
+		    __u32 raddr; // IP路由器地址
+		    ...
+		    sk_buff_data_t head; // 分配空间的开始
+		    sk_buff_data_t data; // 有效数据的开始
+		    sk_buff_data_t tail; // 有效数据的结束
+		    sk_buff_data_t end; // 分配空间的结束
+		    unsigned long len; //有效数据长度
+		    ...
+		};
+	    6.2 sk_buff操作
+		6.2.1 sk_buff分配
+		    struct sk_buff *alloc_skb(unsigned int size, gfp_t priority);
+		    协议栈使用
+		    struct sk_buff *dev_alloc(unsigned int length);
+		    驱动程序应该使用的函数
+		6.2.2 向缓冲区写入数据
+		    unsigned char *skb_push(struct sk_buff *skb, unsigned int len);
+		    在缓冲区开始处写入数据
+		    unsigned char *skb_put(struct sk_buff *skb, unsigned int len);
+		    在缓冲区结尾处增加数据
+		6.2.3 sk_buff释放
+		    void kfree_skb(struct sk_buff *skb);
+		    协议栈使用
+		    void dev_kfree_skb(struct sk_buff *skb);
+		    驱动程序使用
+
+

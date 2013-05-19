@@ -1,0 +1,34 @@
+ioctl(...,unsigned int cmd,unsigned long arg);
+
+
+用户空间：
+int width;
+int height;
+unsigned char *pdata;
+
+width = 100;
+height = 200;
+pdata = 0x7000 0000;
+ioctl( fd, cmd, width );
+ioctl( fd, cmd, height );
+ioctl( fd, cmd, pdata );
+
+内核空间
+ioctl(...,unsigned int cmd,unsigned long arg)
+{
+    unsigned char arr[ ];
+    void __user *argp = (void __user *arg); // arg == 0x7000 0000
+    int width;
+    int height;
+
+    width = (int)arg; //100
+    height = (int)arg; // 200
+
+    copy_from_user(arr, argp, width*height); // width/height dot
+}
+
+
+A=0x61
+0x61 * (width/8) * height;
+ASC32
+

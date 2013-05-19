@@ -1,0 +1,1 @@
+make -C /opt/real6410/kernel/linux2.6.28.6 M=$PWD modules

@@ -1,0 +1,197 @@
+uboot 和文件系统的移植：
+
+bootloader 就是在OS内核运行前就运行的一小段程序。该段程序用于初始化必要的硬件设备，将系统的软硬件环境带到一个
+合适的状态，并从外部存储器或通过网络等通讯方式加载内核，创建内核需要的一些信息，并将这些信息通过相关机制传递给
+内核，最终调用操作系统内核。
+   作用：  1. 初始化硬件设备
+           2. 不同的方式加载内核
+           3. 创建一些内核需要的信息，并传递给内核
+           4. 调用OS内核运行
+
+一个嵌入式Linux OS 从软件的角度看通常可以分为四部分： bootloader, Linux内核, 根文件系统, 用户应用程序。
+
+bootloader的启动过程：
+    第一阶段： 执行最基本的硬件初始化操作，如关闭中断， 关闭看门狗以免处理器被复位，以及关闭MMU功能，关闭处理
+               器缓存(数据缓存一定要关闭,指令缓存可以打开)，设置系统时钟，初始化内存等。
+
+               关闭中断：在异常向量表尚未初始化的情况下，如果发生中断将导致系统崩溃；
+	       关闭MMU：启动MMU进入保护模式是内核的工作。而bootloader本身工作在实模式下，所有的内存操作
+		        使用的都是物理地址；
+	       关闭数据缓存：bootloader主要功能是装在内核映像，映像数据必须真实写回内存中，不能只放在CPU缓存中；
+               指令缓存可以打开，一般情况下，推荐将指令缓存也关闭；
+               一般用汇编编写。
+
+    第二阶段： 一般使用C编写，大体分为一下步骤：
+              1.初始化各种硬件设备，比如CPU的工作频率，初始化串口等
+              2.检测系统内存，主要是确定系统内存容量以及其地址空间信息
+	      3.将内核映像文件加载到内存
+	      4.准备内核引导参数
+	      5.跳转到内核的第一条指令处，开始执行内核初始化代码，控制权转移到内核代码
+
+
+对于ARM来说，通常bootloader必须提供如下的功能：
+   @初始化内存：bootloader必须初始化内存
+   @初始化串口：用于进行开发和调试
+   @创建内核参数列表：这是Linux内核所要求的，如果不给出内核参数，则内核就会使用默认的内核参数。
+   @加载内核映像到内存：一般来说，内核映像必须在内存中运行，所以，把内核加载到内存
+   @启动内核镜像：让执行流程跳转到内核映像的入口
+----------------------------------------
+uboot中内置的环境变量：
+  bootargs: 内核引导参数，根据实际情况进行设置
+  bootcmd:  uboot启动时自动执行的脚本
+  bootfile: 默认的启动映像文件
+
+setenv bootargs 'console=ttySAC0 root=/dev/mtdblock2 rootfstype=yaffs2 init=/linuxrc'
+setenv bootargs 'console=ttyASC0 root=nfs nfsroot=192.168.1.13:/home/sysroot ip=192.168.1.10 init=/linuxrc'
+   console:设置内核的默认控制台
+   root: 用于设置内核根文件系统所在的设备
+   rootfstype: 设置根文件系统的类型
+   init: 参数是内核要执行的根文件系统中的初始化程序
+   ip: 目标机本身的ip地址
+----------------------------------------
+1.引导程序(bootloader), u-boot, redboot(ecos), vivi(Samsung)
+1.1基本操作界面
+1.2基本的通信功能
+1.3操作存储器
+2.Linux内核
+3.文件系统的移植
+3.1文件系统类型：文件在存储器里的存储格式。ext2,3,4,fat32,NTFS
+嵌入式常用文件系统类型：yaffes,cramfs,jiffes,nfs.
+3.2根文件系统内容：文件和文件夹。
+4.函数库和应用程序的移植
+
+
+1.u-boot移植(u-boot-2010.03.tar.bz2)
+跟硬件有关的目录：
+1.1 board:与开发板相关的代码，一般是针对特定目标板的一些初始化和操作代码
+1.2 cpu:处理器相关的代码(最新版本整理在arch目录下)
+1.3 drivers:各种外设接口的驱动程序，如以太网驱动等
+1.4 lib_xxx: 用于存放xxx体系架构的处理器的相关支持
+1.5 fs: 存放了uboot支持的文件系统
+1.6 include: 存放各种CPU及目标板的头文件的头文件和配置文件的公共目录，其中configs目录中存放了
+    	     各种目标板的配置头文件。
+1.7 net: 用于存放与网络功能相关的文件，如bootp,nfs,tftp 等。
+
+
+跟硬件无关的目录：
+1.5 common:u-boot核心代码，存放独立于处理器体系结构的通用代码
+
+include目录:
+该目录下configs子目录有跟开发板相配套的头文件。
+----------------------------------------
+
+uboot需要修改的地方：
+  board/samsung/smdk6410/lowlevel_init.S
+     system_clock_init 初始化系统时钟频率
+     uart_asm_init   串口初始化，初始化几号端口
+     nand_asm_init   nand flash初始化，是否支持nand flash启动
+     mem_ctrl_asm_init  初始化内存（DRAM flash）
+
+uboot移植步骤：
+    第一阶段： 首先执行reset,设置为管理模式，关闭看门狗，屏蔽中断并设置时钟，然后调用cpu_init_crit 对CPU
+     	       进行初始化(清楚指令和数据缓存，禁用MMU和数据指令缓存)，最后调用lowlevel_init 函数设置SDRAM控制
+	       器。在reset的最后 201:ldr pc, _start_armboot 这条指令就是跳转到第二阶段. 再根据具体的定义来选择
+	       不同的实体函数:
+	       	       #ifdef CONFIG_NAND_SPL
+	       	       _start_armboot: .word nand_boot
+		       #else
+		       #ifdef CONFIG_ONENAND_IPL
+	       	       _start_armboot: .word start_oneboot
+	       	       #else
+	       	       _start_armboot: .word start_armboot
+
+    	       cpu/arm1136/start.S 
+	       lowlevel_init: board/samsung/smdk6400/lowlevel_init.S       
+
+    第二阶段： 调用 nand_boot()／start_onebot()/start_armboot()
+    	       start_armboot(): lib_arm/board.c
+               内核启动开始时，会首先检查uboot要启动的内核是不是自己：include/asm-arm/mach-type.h
+	       调用的初始化函数指针数组：init_fnc_t *init_sequence[]
+	       lib_arm/board.c
+	       初始化串口：int serial_init(void)
+	       driver/serial/s3c64xx.c
+	       uboot里面把寄存器定义成一个结构体：
+    
+    第三个阶段： 执行一个循环，进入shell：  main_loop()
+             common/main.c
+--------------------------------------------------------------------------------
+ Uboot命令的实现：
+    uboot的软件架构是高度可扩展的，很重要一部分体现在可扩展的命令结构上。
+    命令放在common/cmd_xxx.c 中实现
+----------------------------------------
+编译uboot程序:
+1. make smdk6400_config
+这样会新产生 include/config.mk, 里面包含了编译时的几个参数：
+ 内容如下：
+    ARCH   = arm
+    CPU    = arm1176
+    BOARD  = smdk6400
+    VENDOR = samsung
+    SOC    = s3c64xx
+    CONFIG_NAND_U_BOOT = y
+
+2. make
+ 
+3. make distclean
+----------------------------------------
+uboot 移植:
+      1. 在 board/samsung/ 下创建一个新的开发板目录,将开发板相关的代码写到该文件夹下
+      2. 修改根目录下Makefile， 添加新开发板的配置选项
+      3. 在include/configs/ 下新建一个board目录同名的头文件，并修改内容
+         比如： cp smdk6400.h my6410.h
+      4. 如果需要支持nand flash启动的话，需要在 nand_spl/board/samsung 添加一个文件夹
+         并且模仿其他型号的板子添加支持文件。
+
+
+uboot引导原理：
+在/nand_spl/board/samsung/ 对应文件夹下面的文件编译出来的代码是使uboot支持nand flash启动的模块；
+首先生成，u-boot-spl, 然后再根据 u-boot-spl 使用objcopy生成u-boot-spl.bin u-boot-spl-16k.bin ;
+支持nand启动的uboot映像是u-boot-nand.bin, 它是由两个文件构成的:u-boot-spl-16k.bin u-boot.bin
+注意：
+    u-boot-spl 是用于把位于nand flash里面的uboot加载到内存中，也就是会被拷贝到 stepping-stone里面，
+    真正的 uboot 是根目录下的 u-boot.bin, u-boot-spl就会把u-boot-nand.bin中的u-boot.bin 加载到内存中
+    执行。
+
+编译命令如下：
+cd /root/u-boot-2010.03/nand_spl/board/samsung/smdk6400 && arm-linux-ld -Bstatic -T /root/u-boot-2010.03/nand_spl/u-boot.lds -Ttext 0  start.o cpu_init.o lowlevel_init.o nand_boot.o nand_ecc.o s3c64xx.o \
+                -Map /root/u-boot-2010.03/nand_spl/u-boot-spl.map \
+                -o /root/u-boot-2010.03/nand_spl/u-boot-spl
+arm-linux-objcopy --gap-fill=0xff -O binary /root/u-boot-2010.03/nand_spl/u-boot-spl /root/u-boot-2010.03/nand_spl/u-boot-spl.bin
+arm-linux-objcopy --gap-fill=0xff --pad-to=4096 -O binary /root/u-boot-2010.03/nand_spl/u-boot-spl /root/u-boot-2010.03/nand_spl/u-boot-spl-16k.bin
+cat nand_spl/u-boot-spl-16k.bin u-boot.bin > u-boot-nand.bin
+
+----------------------------------------
+include/asm-arm/arch-s3c64xx/s3c64x0.h
+
+/* UART (see manual chapter 11) */
+typedef struct {
+	volatile u32	ULCON;
+	volatile u32	UCON;
+	volatile u32	UFCON;
+	volatile u32	UMCON;
+	volatile u32	UTRSTAT;
+	volatile u32	UERSTAT;
+	volatile u32	UFSTAT;
+	volatile u32	UMSTAT;
+#ifdef __BIG_ENDIAN
+	volatile u8	res1[3];
+	volatile u8	UTXH;
+	volatile u8	res2[3];
+	volatile u8	URXH;
+#else /* Little Endian */
+	volatile u8	UTXH;
+	volatile u8	res1[3];
+	volatile u8	URXH;
+	volatile u8	res2[3];
+#endif
+	volatile u32	UBRDIV;
+#ifdef __BIG_ENDIAN
+	volatile u8	res3[2];
+	volatile u16	UDIVSLOT;
+#else
+	volatile u16	UDIVSLOT;
+	volatile u8	res3[2];
+#endif
+} s3c64xx_uart;
+    
+这个结构体包装了uart的寄存器，并且顺序和手册中的顺序相同，所以我们只需要知道基地址即可。               

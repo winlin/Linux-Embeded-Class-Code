@@ -1,0 +1,78 @@
+以模块方式编译helloworld
+    1. 修改Kconfig文件将bool修改为tristate
+    2. 在make menuconfig中选择为m以模块方式编译
+    3. 在.config中确认CONFIG_HELLOWORLD=m
+    4. 执行make zImage重新编译内核(去掉上次编译进内核的helloworld程序)
+    5. 执行make modules编译内核中所有被配置为以模块方式编译的内核代码
+    6. 执行make modules_install INSTALL_MOD_PATH=/opt/nfsroot
+	安装到目标文件系统/lib/modules/$(uname -r)/kernel
+	mkdir -p lib/modules/$(uname -r)
+
+模块操作命令
+    1. modprobe命令
+	加载模块到内存中运行，或者卸载一个已经在内核中运行的模块。
+	在模块加载过程中，如果模块有依赖模块，它将同时加载该模块的依赖模块。
+	modprobe modulename	加载模块
+	modprobe -r modulename	卸载模块
+	在任意目录执行：
+	modprobe helloworld
+	modprobe -r helloworld
+    2. lsmod命令
+	列出当前系统中正在运行的模块
+	该命令实际上是读取/proc/modules文件内容
+	lsmod
+    3. insmod命令
+	加载模块到内存中运行
+	insmod modulename.ko
+    4. rmmod命令
+	从内存中卸载一个正在执行的模块
+	rmmod modulename
+    5. modinfo命令
+	查看模块文件模块信息
+	modinfo modulename.ko
+
+
+
+模块License信息
+    必须为模块指定license，常用：
+	MODULE_LICENSE("Dual BSD/GPL");
+    有效的许可证：
+	"GPL"
+	"GPL V2"
+	"GPL and additional rights"
+	"Dual BSD/GPL"
+	"Dual MPL/GPL"
+	"Proprietary"
+
+模块信息
+    MODULE_LICENSE();
+    MODULE_AUTHOR();
+    MODULE_DISCRIPTION();
+    MODULE_VERSION();
+    MODULE_ALIAS();
+
+
+模块导出符号
+    1. 导出符号的意义？
+    2. 如何导出符号？
+	EXPORT_SYMBOL(symbol_name);
+	EXPORT_SYMBOL_GPL(symbol_name);
+	后者仅仅用于包含GPL许可证的模块。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

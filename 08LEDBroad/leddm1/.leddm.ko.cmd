@@ -1,0 +1,1 @@
+cmd_/home/winlin/leddm.tar.bz2_FILES/leddm1/leddm.ko := arm-linux-ld -EL -r   -o /home/winlin/leddm.tar.bz2_FILES/leddm1/leddm.ko /home/winlin/leddm.tar.bz2_FILES/leddm1/leddm.o /home/winlin/leddm.tar.bz2_FILES/leddm1/leddm.mod.o

@@ -1,0 +1,661 @@
+ 设备模型
+
+sysfs文件系统
+
+kobject结构体
+	该结构体实现了基本的面向对象管理机制，他是构成Linux 2.6设备模型的核心数据结构。
+	该数据结构与sysfs文件系统联系紧密，在内核中注册的每个kobject对象对应在sysfs文件系统中的一个目录。
+	1  kobject数据结构
+		在内核源代码include/linux/kobject.h中定义
+		struct kobject{
+			const char *name;//对象名称
+			struct list_head entry;//用于维护所有同类型的kobject对象的链表
+			struct kobject *parent;//指向可能存在的父对象的指针
+			struct kset *kset;//对象所属集合
+			struct kobj_type *ktype;//对象类型
+			struct sysfs_dirent *sd;//sysfs文件系统目录入口
+			struct kref fref;//对象引用计数
+			unsigned int state_initialized:1;
+			unsigned int state_in_sysfs:1;
+			unsigned int state_add_uevent_sent:1;
+			unsigned int state_remove_uevent_sent:1;
+		};
+	2  kobject结构体操作
+		2.1  初始化操作
+			void kobject_init(struct kobject *kobj,struct kobj_type *ktype);
+		2.2  注册对象到系统
+			int kobject_add(struct kobject *kobj,struct kobject *parent, const char *fmt,...);
+		2.3  初始化并注册对象
+			int kobject_init_and_add(struct kobject *kobj,struct kobj_type *ktype,struct kobject *parent,const char *fmt,...);
+		2.4  删除对象
+			void kobject_del(struct kobject *kobj);
+		2.5  增加引用计数
+			struct kobject *kobject_get(struct kobject *kobj);
+			将kobject对象的应用计数增加1，同时返回该对象指针
+		2.6  减少引用计数
+			struct kobject *kobject_put(struct kobject *kobj);
+			将kobject对象的应用计数减少1，如果引用计数降为0，则调用release方法释放对象。
+	3  kobj_type结构体
+		在内核源代码include/linux/kobject.h中定义
+		struct kobj_type{
+			void (*release)(struct kobject *kobj);
+			struct sysfs_ops *sysfs_ops;
+			struct attribute **default_attrs;
+		};
+		3.1 release成员
+			用于释放kobject占用的资源，当kobject对象的引用计数为0时被调用
+		3.2 sysfs_ops成员
+			sysfs文件系统中文件操作方法的集合
+		3.3 default_attrs成员
+			kobject属性指针数组
+	4  sysfs_ops结构体
+		在内核源代码include/linux/sysfs.h中定义
+		4.1  sysfs_ops数据结构
+			struct sysfs_ops{
+				ssize_t (*show)(struct kobject　*kobj,struct attribute *attr,char *buf);
+				ssize_t (*store)(struct kobject　*kobj,struct attribute *attr,const char *buf,size_t count);
+			};
+		4.2  show成员
+			当用户读属性文件时该函数调用被调用，该函数将属性值存入buf中返回给用户
+		4.3  store成员
+			当用户写属性文件时该函数被调用，用户存储用户传入的属性值。
+	5  attribute结构体
+		在内核源代码include/linux/sysfs.h中定义
+		5.1  attribute数据结构
+			struct attribute{
+				const char *name;
+				struct module *owner;
+				mode_t mode;
+			};
+		5.2  name成员
+			该属性文件名称
+		5.3  owner成员
+			该属性文件拥有者模块
+		5.4  mode成员
+			该属性文件的保护位
+
+步骤：首先定义一个kobject对象，然后注册并添加该对象到系统，然后定义kobj_type对象，并进行操作定义；
+	kobj_type的定义，需要在定义一个sysfs_ops, 这又要定义一个 attribute 对象。		
+		
+================================================================================
+2. kset结构体
+     kset是具有相同类型的kobject对象的集合， 在sysfs文件系统中体现为一个目录。
+     kset数据结构：
+       include/linux/kobject.h
+/**
+ * struct kset - a set of kobjects of a specific type, belonging to a specific subsystem.
+ *
+ * A kset defines a group of kobjects.  They can be individually
+ * different "types" but overall these kobjects all want to be grouped
+ * together and operated on in the same manner.  ksets are used to
+ * define the attribute callbacks and other common events that happen to
+ * a kobject.
+ *
+ * @list: the list of all kobjects for this kset
+ * @list_lock: a lock for iterating over the kobjects
+ * @kobj: the embedded kobject for this kset (recursion, isn't it fun...)
+ * @uevent_ops: the set of uevent operations for this kset.  These are
+ * called whenever a kobject has something happen to it so that the kset
+ * can add new environment variables, or filter out the uevents if so
+ * desired.
+ */
+struct kset {
+	struct list_head list;
+	spinlock_t list_lock;
+	struct kobject kobj;   集合中内嵌的kobject对象， 表示集合本身
+	struct kset_uevent_ops *uevent_ops; 处理热插拔事件的操作集合
+};
+
+----------------------------------------
+   kset的操作：
+   lib/kobject.c
+
+创建并注册：
+/**
+ * kset_create_and_add - create a struct kset dynamically and add it to sysfs
+ *
+ * @name: the name for the kset
+ * @uevent_ops: a struct kset_uevent_ops for the kset
+ * @parent_kobj: the parent kobject of this kset, if any.
+ *
+ * This function creates a kset structure dynamically and registers it
+ * with sysfs.  When you are finished with this structure, call
+ * kset_unregister() and the structure will be dynamically freed when it
+ * is no longer being used.
+ *
+ * If the kset was not able to be created, NULL will be returned.
+ */
+struct kset *kset_create_and_add(const char *name,
+				 struct kset_uevent_ops *uevent_ops,
+				 struct kobject *parent_kobj)	
+		
+
+  kset_uenevt_ops 结构体：
+  include/linux/kobject.h
+
+struct kset_uevent_ops {
+	int (*filter)(struct kset *kset, struct kobject *kobj); 该操作用来过滤决定是否把热插拔事件传递到用户空
+	间，如果返回0，将不允许传递热插拔事件； 
+	const char *(*name)(struct kset *kset, struct kobject *kobj); 该操作将字符串传递给用户空间的热插拔处理
+	程序；
+	int (*uevent)(struct kset *kset, struct kobject *kobj,
+		      struct kobj_uevent_env *env); 该操作将用户空间需要的参数添加到环境变量中。
+};		
+		
+----------------------------------------
+ kref 结构体：
+ include/linux/kref.h
+struct kref {
+	atomic_t refcount;
+};
+ 
+lib/kref.c
+/**
+ * kref_set - initialize object and set refcount to requested number.
+ * @kref: object in question.
+ * @num: initial reference counter
+ */
+void kref_set(struct kref *kref, int num)
+{
+	atomic_set(&kref->refcount, num);
+	smp_mb();
+}
+
+--------------------------------------------------------------------------------
+系统启动时的C语言执行路径：
+init/main.c::start_kernel() --> init/main.c::rest_init() --> init/main.c::kernel_init() --> 
+	init/main.c::do_basic_setup() --> drivers/base/init.c::driver_init()
+================================================================================
+3. Linux设备模型元素
+总线		
+设备
+驱动
+
+ 		
+总线： CPU和设备之间数据传送的通道。
+       在设备模型中， 所有的设备都通过总线相连，甚至是内部的虚拟“Platform”总线。
+       
+       bus_type数据结构
+       include/linux/device.h
+
+struct bus_type {
+	const char		*name;   总线名称
+	struct bus_attribute	*bus_attrs; 总线属性
+	struct device_attribute	*dev_attrs; 设备属性
+	struct driver_attribute	*drv_attrs; 驱动属性
+
+	int (*match)(struct device *dev, struct device_driver *drv); 该方法用于判断指定的驱动程序是否能
+	    驱动指定的设备。成功返回非0值。 当一个新设备或驱动被添加到这条总线时，该方法会被调用。仅是检查名称
+	    是否相同。
+	int (*uevent)(struct device *dev, struct kobj_uevent_env *env); 该方法允许总线在内核为用户空间产生热
+	插拔事件之前，为系统添加环境变量。
+	int (*probe)(struct device *dev);
+	int (*remove)(struct device *dev);
+	void (*shutdown)(struct device *dev);
+
+	int (*suspend)(struct device *dev, pm_message_t state);
+	int (*suspend_late)(struct device *dev, pm_message_t state);
+	int (*resume_early)(struct device *dev);
+	int (*resume)(struct device *dev);
+
+	struct pm_ext_ops *pm;  电源管理操作集合
+
+	struct bus_type_private *p; 
+};
+
+   2。 总线操作
+   driver/base/bus.c 
+
+注册总线：
+/**
+ * bus_register - register a bus with the system.
+ * @bus: bus.
+ *
+ * Once we have that, we registered the bus with the kobject
+ * infrastructure, then register the children subsystems it has:
+ * the devices and drivers that belong to the bus.
+ */
+int bus_register(struct bus_type *bus);  该操作将新的总线添加到内核，如果注册成功，在sysfs下的/sys/bus目录下
+    				 	 将看到注册的总线。
+
+注销总线：
+/**
+ * bus_unregister - remove a bus from the system
+ * @bus: bus.
+ *
+ * Unregister the child subsystems and the bus itself.
+ * Finally, we call bus_put() to release the refcount
+ */
+void bus_unregister(struct bus_type *bus); 从内核中删除该类型的总线，同时从/sys/bus删除对应的目录。
+
+  3。 bus_attribute结构体
+  include/linux/device.h
+
+struct bus_attribute {
+	struct attribute	attr;
+	ssize_t (*show)(struct bus_type *bus, char *buf);
+	ssize_t (*store)(struct bus_type *bus, const char *buf, size_t count);
+};
+		
+ bus_attribute操作
+ drivers/base/bus.c
+ 1。生成总线属性：
+    extern int __must_check bus_create_file(struct bus_type *, struct bus_attribute *);
+ 2。移出总线属性
+  extern void bus_remove_file(struct bus_type *, struct bus_attribute *);		
+		
+   4. device_attribute
+
+/* interface for exporting device attributes */
+struct device_attribute {
+	struct attribute	attr;
+	ssize_t (*show)(struct device *dev, struct device_attribute *attr,
+			char *buf);
+	ssize_t (*store)(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count);
+}
+  
+device_create_file()
+device_remove_file()
+
+   5. driver_attribute		
+   
+
+driver_create_file()
+driver_remove_file()
+   
+   6. pm_ext_ops 结构体		
+  driver/base/base.h
+/**
+ * struct bus_type_private - structure to hold the private to the driver core portions of the bus_type structure.
+ *
+ * @subsys - the struct kset that defines this bus.  This is the main kobject
+ * @drivers_kset - the list of drivers associated with this bus
+ * @devices_kset - the list of devices associated with this bus
+ * @klist_devices - the klist to iterate over the @devices_kset
+ * @klist_drivers - the klist to iterate over the @drivers_kset
+ * @bus_notifier - the bus notifier list for anything that cares about things
+ * on this bus.
+ * @bus - pointer back to the struct bus_type that this structure is associated
+ * with.
+ *
+ * This structure is the one that is the actual kobject allowing struct
+ * bus_type to be statically allocated safely.  Nothing outside of the driver
+ * core should ever touch these fields.
+ */
+struct bus_type_private {
+	struct kset subsys;
+	struct kset *drivers_kset;
+	struct kset *devices_kset;
+	struct klist klist_devices;
+	struct klist klist_drivers;
+	struct blocking_notifier_head bus_notifier;
+	unsigned int drivers_autoprobe:1; 驱动自动检测标志
+	struct bus_type *bus;
+};
+
+  属性声明宏：
+  几种使用宏来定义属性变量：
+include/linux/sysfs.h
+	
+/**
+ * Use these macros to make defining attributes easier. See include/linux/device.h
+ * for examples..
+ */
+
+#define __ATTR(_name,_mode,_show,_store) { \
+	.attr = {.name = __stringify(_name), .mode = _mode },	\
+	.show	= _show,					\
+	.store	= _store,					\
+}
+-----------------------
+include/linux/device.h
+#define BUS_ATTR(_name, _mode, _show, _store)	\
+struct bus_attribute bus_attr_##_name = __ATTR(_name, _mode, _show, _store)
+
+#define DEVICE_ATTR(_name, _mode, _show, _store) \
+struct device_attribute dev_attr_##_name = __ATTR(_name, _mode, _show, _store)
+
+#define DRIVER_ATTR(_name, _mode, _show, _store)	\
+struct driver_attribute driver_attr_##_name =		\
+	__ATTR(_name, _mode, _show, _store)
+
+========================================
+设备：
+	总线也是设备，必须按照设备注册。
+
+	1。 device数据结构
+	include/linux/device.h
+
+struct device {
+	struct klist		klist_children; 维护子设备链表
+	struct klist_node	knode_parent;	/* node in sibling list */ 对应父设备的节点
+	struct klist_node	knode_driver;   对应的驱动节点
+	struct klist_node	knode_bus;      对应总线的节点
+	struct device		*parent;   可能存在的父设备的指针
+
+	struct kobject kobj;    设备对象本身
+	char	bus_id[BUS_ID_SIZE];	/* position on parent bus */ 在总线上唯一表示该设备的字符串
+	const char		*init_name; /* initial name of the device */ 初始设备名称
+	struct device_type	*type; 设备类型
+	unsigned		uevent_suppress:1; uevent禁止位
+
+	struct semaphore	sem;	/* semaphore to synchronize calls to
+					 * its driver.
+					 */
+
+	struct bus_type	*bus;		/* type of bus device is on */
+	struct device_driver *driver;	/* which driver has allocated this
+					   device */
+	void		*driver_data;	/* data private to the driver */
+	void		*platform_data;	/* Platform specific data, device
+					   core doesn't touch it */
+	struct dev_pm_info	power;
+
+#ifdef CONFIG_NUMA
+	int		numa_node;	/* NUMA node this device is close to */
+#endif
+	u64		*dma_mask;	/* dma mask (if dma'able device) */
+	u64		coherent_dma_mask;/* Like dma_mask, but for
+					     alloc_coherent mappings as
+					     not all hardware supports
+					     64 bit addresses for consistent
+					     allocations such descriptors. */
+
+	struct device_dma_parameters *dma_parms;
+
+	struct list_head	dma_pools;	/* dma pools (if dma'ble) */
+
+	struct dma_coherent_mem	*dma_mem; /* internal for coherent mem
+					     override */
+	/* arch specific additions */
+	struct dev_archdata	archdata;
+
+	spinlock_t		devres_lock; 设备资源操作锁
+	struct list_head	devres_head; 设备资源链表头
+
+	struct klist_node	knode_class;
+	struct class		*class;
+	dev_t			devt;	/* dev_t, creates the sysfs "dev" */
+	struct attribute_group	**groups;	/* optional groups */
+
+	void	(*release)(struct device *dev); 释放设备操作
+};
+----------------------------------------
+	设备的操作：
+	drivers/base/core.c
+设备初始化：
+	/**
+ * device_initialize - init device structure.
+ * @dev: device.
+ *
+ * This prepares the device for use by other layers by initializing
+ * its fields.
+ * It is the first half of device_register(), if called by
+ * that function, though it can also be called separately, so one
+ * may use @dev's fields. In particular, get_device()/put_device()
+ * may be used for reference counting of @dev after calling this
+ * function.
+ *
+ * NOTE: Use put_device() to give up your reference instead of freeing
+ * @dev directly once you have called this function.
+ */
+void device_initialize(struct device *dev)
+
+设备注册：
+/**
+ * device_register - register a device with the system.
+ * @dev: pointer to the device structure
+ *
+ * This happens in two clean steps - initialize the device
+ * and add it to the system. The two steps can be called
+ * separately, but this is the easiest and most common.
+ * I.e. you should only call the two helpers separately if
+ * have a clearly defined need to use and refcount the device
+ * before it is added to the hierarchy.
+ *
+ * NOTE: _Never_ directly free @dev after calling this function, even
+ * if it returned an error! Always use put_device() to give up the
+ * reference initialized in this function instead.
+ */
+int device_register(struct device *dev)
+{
+	device_initialize(dev);
+	return device_add(dev);
+}
+
+设备添加：
+/**
+ * device_add - add device to device hierarchy.
+ * @dev: device.
+ *
+ * This is part 2 of device_register(), though may be called
+ * separately _iff_ device_initialize() has been called separately.
+ *
+ * This adds @dev to the kobject hierarchy via kobject_add(), adds it
+ * to the global and sibling lists for the device, then
+ * adds it to the other relevant subsystems of the driver model.
+ *
+ * NOTE: _Never_ directly free @dev after calling this function, even
+ * if it returned an error! Always use put_device() to give up your
+ * reference instead.
+ */
+int device_add(struct device *dev)
+
+设备注销：
+/**
+ * device_del - delete device from system.
+ * @dev: device.
+ *
+ * This is the first part of the device unregistration
+ * sequence. This removes the device from the lists we control
+ * from here, has it removed from the other driver model
+ * subsystems it was added to in device_add(), and removes it
+ * from the kobject hierarchy.
+ *
+ * NOTE: this should be called manually _iff_ device_add() was
+ * also called manually.
+ */
+void device_del(struct device *dev)
+
+----------------------------------------
+device_type数据结构
+include/linux/device.h
+
+/*
+ * The type of device, "struct device" is embedded in. A class
+ * or bus can contain devices of different types
+ * like "partitions" and "disks", "mouse" and "event".
+ * This identifies the device type and carries type-specific
+ * information, equivalent to the kobj_type of a kobject.
+ * If "name" is specified, the uevent will contain it in
+ * the DEVTYPE variable.
+ */
+struct device_type {
+	const char *name;
+	struct attribute_group **groups;
+	int (*uevent)(struct device *dev, struct kobj_uevent_env *env);
+	void (*release)(struct device *dev);
+
+	int (*suspend)(struct device *dev, pm_message_t state); //设置设备的电源状态为suspend
+	int (*resume)(struct device *dev); //设置设备电源的状态为正常
+
+	struct pm_ops *pm;  设备电源操作集合
+};
+
+================================================================================
+
+驱动
+	device_driver数据结构
+	include/linux/device.h 
+	
+struct device_driver {
+	const char		*name;  驱动名称
+	struct bus_type		*bus;  驱动所属总线
+
+	struct module		*owner;  驱动模块拥有者
+	const char 		*mod_name;	/* used for built-in modules */通常不用
+
+	int (*probe) (struct device *dev);
+	int (*remove) (struct device *dev);
+	void (*shutdown) (struct device *dev);
+	int (*suspend) (struct device *dev, pm_message_t state);
+	int (*resume) (struct device *dev);
+	struct attribute_group **groups;  可选的驱动的属性集
+
+	struct pm_ops *pm;  
+
+	struct driver_private *p;
+};
+
+驱动操作：
+	驱动注册
+	驱动注销
+int __must_check driver_register(struct device_driver *drv);
+void driver_unregister(struct device_driver *drv);
+
+----------------------------------------
+driver_private数据结构
+	driver/base/base.h 
+	
+struct driver_private {
+	struct kobject kobj;   驱动对象
+	struct klist klist_devices; 驱动所管理的设备链表
+	struct klist_node knode_bus; 驱动对应的总线的结点
+	struct module_kobject *mkobj; 模块对象
+	struct device_driver *driver; 指向驱动的指针
+};
+
+--------------------------------------------------------------------------------
+类
+实际上,类和总线在sysfs中有些相似, 类也代表了一个子系统, 一个类代表了具有相似特征和操作接口的一系列
+设备, 类为这些同类的设备提供了相同的操作接口.
+
+include/linux/device.h
+/*
+ * device classes
+ */
+struct class {
+	const char		*name;
+	struct module		*owner;
+
+	struct class_attribute		*class_attrs;
+	struct device_attribute		*dev_attrs;
+	struct kobject			*dev_kobj;
+
+	int (*dev_uevent)(struct device *dev, struct kobj_uevent_env *env);
+
+	void (*class_release)(struct class *class);
+	void (*dev_release)(struct device *dev);
+
+	int (*suspend)(struct device *dev, pm_message_t state);
+	int (*resume)(struct device *dev);
+
+	struct pm_ops *pm;
+	struct class_private *p;
+};
+
+类的操作方法:
+类的注册:
+/* This is a #define to keep the compiler from merging different
+ * instances of the __key variable */
+#define class_register(class)			\
+({						\
+	static struct lock_class_key __key;	\
+	__class_register(class, &__key);	\
+})
+类的撤销:
+void class_unregister(struct class *class);
+
+类的销毁:
+ void class_destroy(struct class *cls);
+
+----------------------------------------
+类的 class_private结构: 
+     drivers/base/base.h
+
+/**
+ * struct class_private - structure to hold the private to the driver core portions of the class structure.
+ *
+ * @class_subsys - the struct kset that defines this class.  This is the main kobject
+ * @class_devices - list of devices associated with this class
+ * @class_interfaces - list of class_interfaces associated with this class
+ * @class_dirs - "glue" directory for virtual devices associated with this class
+ * @class_mutex - mutex to protect the children, devices, and interfaces lists.
+ * @class - pointer back to the struct class that this structure is associated
+ * with.
+ *
+ * This structure is the one that is the actual kobject allowing struct
+ * class to be statically allocated safely.  Nothing outside of the driver
+ * core should ever touch these fields.
+ */
+struct class_private {
+	struct kset class_subsys;
+	struct klist class_devices;
+	struct list_head class_interfaces;
+	struct kset class_dirs;
+	struct mutex class_mutex;
+	struct class *class;
+};
+
+----------------------------------------
+类的 class_attribute 
+    include/linux/device.h
+
+struct class_attribute {
+	struct attribute attr;
+	ssize_t (*show)(struct class *class, char *buf);
+	ssize_t (*store)(struct class *class, const char *buf, size_t count);
+};
+
+CLASS_ATTR宏定义:
+#define CLASS_ATTR(_name, _mode, _show, _store)			\
+struct class_attribute class_attr_##_name = __ATTR(_name, _mode, _show, _store)
+
+--------------------------------------------------------------------------------
+
+Platform总线:
+platform 总线是在2.6.0内核以后引入的, 我们可以把自己定义的总线放入 platform 里面.
+include/linux/platform_device.h
+
+struct platform_device {
+	const char	* name;
+	int		id;
+	struct device	dev;
+	u32		num_resources;
+	struct resource	* resource;
+};
+
+================================================================================
+对sysfs文件系统和 kobject, kset, subsys, bus_type, device, device_driver, class 系统模型的总结
+
+   随着内核的进步,需要提供一个对系统结构的一般性抽象描述.
+   设备模型使得操作系统能以正确的顺序遍历系统硬件.
+
+2.6版本的设备模型提供如下功能:
+   1. 电源管理和系统关机
+   2. 与用户空间通讯
+         sysfs虚拟文件系统的实现于设备模型密切相关, 并且向外界展示了它所表述的结构. 用户空间
+	 可以通过访问sysfs来获得设备的信息.
+   3. 热插拔设备
+   4. 设备类型
+         系统感兴趣的是有那些设备是可以使用的, 而不是如何建立连接的. 设备模型包括将设备进行
+	 分类的功能. 比如/sys/devices 下面表示了所用系统可用的设备.
+   5. 对象的生命周期
+        
+   kobject是组成设备模型的基本结构, 对于kobject更重要的意义在于通过内嵌kobject来把高级对象连接到设备模型上.
+   通常, 内核使用kobject结构将各个对象连接起来组成一个分层的结构体系, 从而与模型化的子系统相匹配. 有两种独立的
+   机制用于连接: parent指针 和 kset .
+   
+   kobject是隐藏在sysfs虚拟文件系统后面的机制, 对于sysfs中的每个目录, 内核中都会存在一个对应的kobject. 
+   每个kobject都输出一个/多个属性, 它们在kobject的sysfs目录中表现为文件, 其中的内容由内核生成. 
+   
+   subsys子系统是对内核中一些更高级部分的描述. 子系统通常(但不一定)显式在sysfs分层结构中的顶层.
+   内核中的子系统包括block_subsys(对块设备来说是 /sys/block), devices_subsys(/sys/devices 设备分层结构的核心)
+   以及内核所知小的用于各种总线的特定子系统.
+
+   kobject/kset属于sysfs系统的底层; bus_type/device/device_driver/class 属于sysfs系统的上层. 
+   
+   我们在实际的使用中往往都是"内嵌"这些数据结构,来实现我们自己的设备结构.
+   
+================================================================================

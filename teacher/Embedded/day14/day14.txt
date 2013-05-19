@@ -1,0 +1,139 @@
+内存与I/O
+    1. I/O端口操作
+	inb()
+	inw()
+	inl()
+	insb()
+	insw()
+	insl()
+    2. I/O内存操作
+	在arch/arm/include/asm/io.h定义
+	2.1 读I/O内存
+	    unsigned int ioread8(void *addr);
+	    unsigned int ioread16(void *addr);
+	    unsigned int ioread32(void *addr);
+	2.2 写I/O内存
+	    unsigned int iowrite8(u8 val,void *addr);
+	    unsigned int iowrite16(u16 val, void *addr);
+	    unsigned int iowrite32(u32 val, void *addr);
+	2.3 读一串I/O内存
+	    void ioread8_rep(void *addr, void *buf, unsigned long count);
+	    void ioread16_rep(void *addr, void *buf, unsigned long count);
+	    void ioread32_rep(void *addr, void *buf, unsigned long count);
+	2.4 写一串I/O内存
+	    void iowrite8_rep(void *addr, void *buf, unsigned long count);
+	    void iowrite16_rep(void *addr, void *buf, unsigned long count);
+	    void iowrite32_rep(void *addr, void *buf, unsigned long count);
+	2.5 复制I/O内存
+	    void memcpy_fromio(void *dest, void *source, unsigned int count);
+	    void memcpy_toio(void *dest, void *source, unsigned int count);
+	2.6 设置I/O内存
+	    void memset_io(void *addr, u8 value, unsigned int count);
+    3. 申请和释放I/O内存
+	在内核源代码include/linux/ioport.h定义
+	3.1申请
+	    struct resource *request_mem_region(unsigned long first, unsigned long len, const char *name);
+		first:申请起始I/O内存地址
+		len: 申请I/O内存长度
+		name:I/O内存名称
+		返回值：成功返回资源指针，失败返回NULL
+	3.2 释放
+	    void release_mem_region(unsigned long start, unsigned long len);
+		first:申请起始I/O内存地址
+		len: 申请I/O内存长度
+    4. I/O映射
+	4.1 I/O内存映射
+	    在内核中访问I/O内存之前，需要首先使用ioremap()函数将设备所处的物理地址映射到内核虚拟地址，该地址可以用来存取特定的物理地址范围。通过ioremap()函数获得的虚拟地址应该被iounmap()释放。
+	    ioremap()函数类似于vmalloc()功能，也需要建立新的页表，但是它并不进行vmalloc()中所执行的内存分配行为。
+	4.2 I/O内存映射操作
+	    在arch/arm/include/asm/io.h中定义
+	    void *ioremap(unsigned long offset, unsigned long size);
+	    void iounmap(void *addr);
+
+
+mmap设备操作
+    1. mmap系统调用
+	a). 在进程的虚拟内存空间查找一块VMA
+	b). 对这块VMA进行映射
+	c). 如果设备驱动程序或者文件系统的file_operations定义了mmap操作，则调用它
+	d). 将这个VMA插入到进程VMA链表中
+    2. 虚拟内存区域
+	在Linux内核中使用vm_area_struct来描述虚拟内存区
+	在include/linux/mm_types.h中定义
+	struct vm_area_struct {
+	    struct mm_struct *vm_mm; // 所处的地址空间
+	    unsigned long vm_start; //虚拟内存区起始地址
+	    unsigned long vm_end; // 虚拟内存区结束地址
+	    pgprot_t vm_page_prot; //访问权限
+	    unsigned long vm_flags; // 虚拟内存区域标志
+		VM_IO: 该区域为内存映射的I/O区域，该标志会阻止系统将该区域包含在进城的存放转存(core dump)中
+		VM_RESERVED:该标志表示该内存区域不能被换出
+	    ...
+	    struct vm_operations_struct *vm_ops; // 操作VMA的函数集指针
+	    unsigned long vm_pgoff; //偏移(页帧号)
+	    ...
+	};
+	struct vm_operations_struct {
+	    void (*open)(struct vm_area_struct *area); // 打开vma的函数
+	    void (*close)(struct vm_area_struct *area); //关闭vma的函数
+	    ...
+	};
+	当用户进行mmap()系统调用后，尽管VMA在设备驱动文件操作结构体的mmap()设备操作被调用前就已经产生，内核不会调用vma的open()函数，通常需要在驱动的mmap()设备操作中显式调用vma->vm_ops->open()。
+    3. mmap设备操作
+	将用户空间的一段地址关联到设备内存上。当用户读写这段用户空间地址时，实际上是在访问设备。
+	int (*mmap)(struct file *filp, struct vm_area_struct *area);
+	mmap操作的任务就是建立虚拟地址到物理地址的页表。
+	大多数驱动都不需要提供设备内存到用户空间的映射能力，因为，对于串口等面向流的设备而言，实现这种映射毫无疑义。
+    4. mmap建立页表的方法
+	4.1 使用remap_pfn_range()函数一次建立所有页表
+	    int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr, unsigned long pfn, unsigned size, pgprot_t prot);
+	    在内核源代码mm/memory.c中实现
+	    vma:虚拟内存区域指针
+	    addr:虚拟内存起始地址
+	    pfn:要映射的物理地址所在物理页帧号，可通过将物理地址>>PAGE_SHIFT得到
+	    size:要映射区域的大小
+	    prot:vma的保护属性
+	4.2 使用nopage()每次为vma建立一个页表
+    5. I/O内存静态映射
+	在ARM Linux系统中，通常会在内核代码中建立外设I/O内存物理地址到内核虚拟地址的静态映射，这个映射通过map_desc数据结构来描述。
+	在内核源代码arch/arm/include/asm/mach/map.h中定义
+	struct map_desc {
+	    unsigned long virtual; //虚拟地址
+	    unsigned long pfn; //__phys_to_pfn(phy_addr)
+	    unsigned long length; // 大小
+	    unsigned int type; // 类型
+	};
+    6. DMA
+	在内核源代码arch/arm/kernel/dma.c中实现
+	申请和释放DMA通道
+	int request_dma(dmach_t channel, const char *dev_id);
+	void free_dma(dmach_t channel);
+
+
+
+MISC设备(混杂设备)
+    它是Linux中的一类特殊设备，它们共享一个主设备号(10)，但是次设备号不同。
+    1. miscdevice数据定义
+	在内核源代码include/linux/miscdevice.h中定义
+	struct miscdevice {
+	    int minor;
+	    const char *name;
+	    const struct file_operations *fops;
+	    struct list_head list;
+	    struct device *parent;
+	    struct device *this_device;
+	};
+    2. 混杂设备注册和注销
+	在内核源代driver/char/misc.c中实现
+	int misc_register(struct miscdevice *misc);
+	int misc_deregister(struct miscdevice *misc);
+
+
+
+
+
+
+
+
+
+

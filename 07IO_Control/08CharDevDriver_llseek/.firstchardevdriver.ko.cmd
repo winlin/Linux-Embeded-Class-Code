@@ -1,0 +1,1 @@
+cmd_/home/winlin/myCodes/Embedded/7IO_Control/08CharDevDriver_llseek/firstchardevdriver.ko := arm-linux-ld -EL -r   -o /home/winlin/myCodes/Embedded/7IO_Control/08CharDevDriver_llseek/firstchardevdriver.ko /home/winlin/myCodes/Embedded/7IO_Control/08CharDevDriver_llseek/firstchardevdriver.o /home/winlin/myCodes/Embedded/7IO_Control/08CharDevDriver_llseek/firstchardevdriver.mod.o

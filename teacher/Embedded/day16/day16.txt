@@ -1,0 +1,224 @@
+
+类(Class)
+    1. class数据结构
+	在内核源代码include/linux/device.h中定义
+	struct class {
+	    const char *name; //类名称
+	    struct module *owner; // 类的模块拥有者
+
+	    struct class_attribute *class_attr; //类属性
+	    struct device_attribute *dev_attrs; //设备属性
+	    struct kobject *dev_kobj; // 类对象
+
+	    int (*dev_uevent)(str device *dev, struct kobj_uevent_env *env);
+
+	    void (*class_release)(struct class *class);
+	    void (*dev_release)(struct device *dev);
+
+	    int (*suspend)(struct device *dev, pm_message_t state);
+	    int (*resume)(struct device *dev);
+
+	    struct pm_ops *pm;
+	    struct class_private *p;
+	};
+    2. 类操作
+	2.1 类生成并注册
+	    class_create
+	2.2 类销毁
+	    class_destroy
+    3. class_private数据结构
+	在内核源代码drivers/base/base.h中定义
+	struct class_private {
+	    struct kset class_subsys;
+	    struct klist class_devices;
+	    struct list_head class_interface;
+	    struct kset class_dirs;
+	    struct mutex class_mutex;
+	    struct class *class;
+	};
+    4. class_attribute数据结构
+	在内核源代码include/linux/device.h中定义
+	struct class_attribute {
+	    struct attribute attr;
+	    ssize_t (*show)(...);
+	    ssize_t (*store)(...);
+	};
+    5. CLASS_ATTR宏
+	在内核源代码include/linux/device.h中定义
+	#define CLASS_ATTR(_name, _mode, _show, _store) struct class_attribute class_attr_##_name = __ATTR(_name, _mode, _show, _store)
+
+
+
+Platform总线
+
+
+
+块设备
+    1.块设备驱动注册与注销
+	在内核源代码include/linux/fs.h中定义
+	在内核源代码block/genhd.c中实现
+	1.1 块设备注册
+	    int register_blkdev(unsigned int major, const char *name);
+	    major:块设备号，如果为0，内核分配一个新的主设备号 
+	    name: 块设备名称
+	    返回值：如果major不为0，成功返回0，失败返回负值
+		    如果major为0，返回系统自动分配的主设备号
+	1.2 块设备注销
+	    void unregister_blkdev(unsigned int major, const char *name);
+    2. 块设备相关数据结构
+	2.1 block_device_operations数据结构
+	    在内核源代码include/linux/blkdev.h中定义
+	    struct block_device_operations {
+		int (*open)(...);
+		int (*release)(...);
+		int (*locked_ioctl)(...);
+		int (*ioctl)(...);
+		int (*compat_ioctl)(...);
+		int (*direct_access)(...);
+		int (*media_changed)(...);
+		int (*revalidate_disk)(...);
+		int (*getgeo)(...);
+		struct module *owner;
+	    };
+	2.2 block_device数据结构
+	    在内核源代码include/linux/fs.h中定义
+	2.3 gendisk数据结构
+	    在内核源代码include/linux/genhd.h中定义
+	    struct gendisk {
+		int major; //主设备号
+		int first_minor; // 起始次设备号
+		int minors; // 次设备数据
+		char disk_name[ DISK_NAME_LEN ]; //磁盘名称
+
+		struct disk_part_tbl *part_tbl; //分区表
+		struct hd_struct part0;
+
+		struct block_device_operations *fops; //块设备操作集合
+		struct request_queue *queue; //块设备请求队列
+		void *private_data; //私有数据
+		...
+	    };
+	2.4 request数据结构
+	    在内核源代码include/linux/blkdev.h中定义
+	    struct request {
+		struct list_head queuelist; // 请求队列操作链表
+		...
+		struct request_queue *q; //该请求所属请求队列
+		...
+		sector_t sector; //待传输的下一个扇区
+		sector_t hard_sector; //待完成的下一个扇区
+		unsigned long nr_sectors; //待传输的扇区数
+		unsigned long hard_nr_sectors; //待完成的扇区数
+		unsigned int current_nr_sectors; //当前I/O操作中待传输的扇区数
+		unsigned int hard_cur_sectors; //当前I/O操作中待完成的扇区数
+		struct bio *bio; // 请求的bio结构体指针
+		struct bio *biotail; //请求的bio结构体指针(尾部)
+		...
+		unsigned short nr_phys_segments; //请求在内存中占据的不连续的段的数目
+		...
+		char *buffer; //传输数据缓冲区指针(内核虚拟地址)
+		...
+		int ref_count; //请求引用计数
+		...
+	    };
+	2.5 bio数据结构
+	    在内核源代码include/linux/bio.h中定义
+	    struct bio {
+		sector_t bi_sector; // 该bio要操作的起始扇区
+		...
+		unsigned long bi_flags; //描述bio的标志，最低位为读写标志，被置位表示写请求。可以使用bio_data_dir(bio)宏来获取读写方向。
+		...
+		unsigned int bi_phys_segments; //该bio操作的物理段的数目
+		unsigned int bi_size; //被传输的数据大小(按字节计算)，可以通过bio_sectors(bio)来获取以扇区为单位的大小
+		...
+		struct bio_vec *bi_io_vec; //该bio处理的真实的向量
+		...
+	    };
+	2.6 bio_vec数据结构
+	     在内核源代码include/linux/bio.h中定义
+	    struct bio_vec {
+		struct page *bv_page; //页指针
+		unsigned int bv_len; //待传输的字节数
+		unsigned int bv_offset; //偏移地址
+	    };
+	2.7 request_queue数据结构
+	    在内核源代码include/linux/blkdev.h中定义
+	    struct request_queue {
+		...
+		unsigned long nr_request; //最大请求数量
+		...
+		unsigned int max_sectors; //最大扇区数
+		...
+		unsigned int max_phys_segments; //最大段数
+		...
+		unsigned short hardsect_size; //硬件扇区尺寸
+		unsigned int max_segment_size; //最大段边界
+		unsigned long seg_boundary_mask; //段边界掩码
+		...
+		unsigned int dma_alignmnet; //DMA传送的内存对齐限制
+		...
+	    };
+	2.8 hd_geometry数据结构
+	    在内核源代码include/linux/hdreg.h中定义
+	    struct hd_geometry {
+		unsigned char heads;
+		unsigned char sectors;
+		unsigned short cylinders;
+		unsigned long start;
+	    };
+    3. gendisk操作
+	在内核源代码include/linux/genhd.h中定义
+	在内核源代码block/genhd.c中实现
+	del_gendisk在内核源代码fs/partitions/check.c中实现
+	3.1 alloc_disk操作
+	    该函数分配一个gendisk结构体，并返回指针
+	    struct gendisk *alloc_gendisk(int minors);
+	    minors: 该设备使用次设备的数目，一般就是指分区数目。该值设定后不能修改。
+	3.2 add_disk操作
+	    该函数应该在磁盘准备好可以被操作之后再调用。
+	    void add_disk(struct gendisk *disk);
+	3.3 del_gendisk操作
+	    void del_gendisk(struct gendisk *disk);
+	3.4 get/set_capacity操作
+	    sector_t get_capacity(struct gendisk *disk);
+		disk: 待操作的磁盘
+		返回值：磁盘容量(实际是扇区数)
+	    void set_capacity(struct gendisk *disk, sector_t size);
+	3.5 get/put_disk操作
+	    这个两个操作用来操作引用计数，驱动应该是从来不需要调用它们。
+	    实际上，通常对于del_gendisk操作的调用去掉了最后一个gendisk的最终引用，但是不保证这样。
+	    struct kobject *get_disk(struct gendisk *disk);
+	    void put_disk(struct gendisk *disk);
+    4. bio操作宏和函数
+    5. request_queue操作
+	在内核源代码include/linux/blkdev.h中定义
+	实现分别在内核源代码block/bld-core.c elevator.c blk-settings.c中
+	内核源代码block目录下包含电梯调度算法相关队列处理函数。
+	5.1 blk_init_queue函数
+	    创建并初始化一个请求队列
+	    struct request_queue *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock);
+		rfn: 队列请求处理函数
+		lock:保护队列操作的锁
+		返回值：创建并初始化后的请求队列
+	5.2 blk_cleaup_queue函数
+	    清除请求队列中的请求
+	    void blk_cleaup_queue(struct request_queue *q);
+	5.3 blk_alloc_queue函数
+	    分配一个请求队列
+	    对应Flash、RAM Disk等完全随机访问的非机械设备，并不需要复杂的I/O调度。此时，可以使用该函数分配一个请求队列，并使用后面的blk_queue_make_request()函数来绑定请求队列和"制造请求"函数。
+	    struct request_queue *blk_alloc_queue(gfp_t gfp_mask);
+		gfp_mask: 分配请求队列结构体内存空间的内核内存分配标志。
+	5.4 blk_queue_make_request函数
+	    绑定请求队列和“制造”请求函数
+	    void blk_queue_make_request(struct request_queue *q, mak_request_fn *mfn);
+	5.5 elv_next_request函数
+	    使用电梯调度算法提取对列中的下一个请求。
+	    struct request *elv_next_request(struct request_queue *q);
+	
+
+
+
+
+
+
+

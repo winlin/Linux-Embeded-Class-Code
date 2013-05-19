@@ -1,0 +1,75 @@
+1. 内核目录介绍
+   arch :和特定CPU启动有关的代码
+   drivers : 硬件驱动程序
+
+2. 如果想要学习文件系统,可以查看 fs/romfs ,它是最精简的只读文件系统
+
+3. 引导程序和内核的接口  MACHINE_START/MACHINE_END
+   arch/arm/include/asm/mach/arch.h 
+/*
+ * Set of macros to define architecture features.  This is built into
+ * a table by the linker.
+ */
+#define MACHINE_START(_type,_name)			\
+static const struct machine_desc __mach_desc_##_type	\
+ __used							\
+ __attribute__((__section__(".arch.info.init"))) = {	\
+	.nr		= MACH_TYPE_##_type,		\
+	.name		= _name,
+
+#define MACHINE_END				\
+};
+
+struct machine_desc {
+	/*
+	 * Note! The first four elements are used
+	 * by assembler code in head.S, head-common.S
+	 */
+	unsigned int		nr;		/* architecture number	*/
+	unsigned int		phys_io;	/* start of physical io	*/
+	unsigned int		io_pg_offst;	/* byte offset for io 
+						 * page tabe entry	*/
+
+	const char		*name;		/* architecture name	*/
+	unsigned long		boot_params;	/* tagged list		*/
+
+	unsigned int		video_start;	/* start of video RAM	*/
+	unsigned int		video_end;	/* end of video RAM	*/
+
+	unsigned int		reserve_lp0 :1;	/* never has lp0	*/
+	unsigned int		reserve_lp1 :1;	/* never has lp1	*/
+	unsigned int		reserve_lp2 :1;	/* never has lp2	*/
+	unsigned int		soft_reboot :1;	/* soft reboot		*/
+	void			(*fixup)(struct machine_desc *,
+					 struct tag *, char **,
+					 struct meminfo *);
+	void			(*map_io)(void);/* IO mapping function	*/
+	void			(*init_irq)(void);
+	struct sys_timer	*timer;		/* system tick timer	*/
+	void			(*init_machine)(void);
+};
+
+一个内核同时支持多个平台的原因是: 我们可以定义多个 machine_desc 对象,这些对象放在
+固定的内存空间或者程序段(__section__(".arch.info.init"))中, 这样通过遍历不同的对象就可以
+获得相应的平台CPU会被调用,进行初始化.
+
+平台号在 arch/arm/tools/mach-types 下面:
+如果,我们移植的Uboot和内核对应的平台号不同,我们可以采用两种方式:
+ 1.我们在uboot和内核中再自定义一个平台号
+ 2.使用其他平台的平台号作为我们的平台号
+
+----------------------------------------
+修改内核:
+  1. 修改Makefile,指定特定的编译器
+     ARCH		?= arm
+     CROSS_COMPILE	?= arm-linux-
+  2. 指定具体的配置文件 
+     make s3c6400_defconfig
+  3. make zImage
+
+
+注意: uImage是uboot专用的内核,不能使用 make uImage 默认生成,需要把编译uboot时从产生的mkImage
+      拷贝到一个搜索路径中去.
+----------------------------------------
+
+三星的各个芯片的串口初始化模块一般都是通用的,一般不需要修改.

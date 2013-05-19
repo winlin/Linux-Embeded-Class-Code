@@ -1,0 +1,16 @@
+1. 触摸屏不准的可以运行：
+	/usr/sbin/ts_calibrate 进行屏幕校准
+
+2. 在服务器程序中，如果是多进程，则在父进程里面要对 SIGCHLD 子进程退出消息处理的函数，
+   以防止僵尸进程的产生。
+   在SIGCHLD信号处理的过程中我们使用 waitpid 来进行回收资源，因为 wait 函数存在“信号叠加”的
+   问题， 但是waitpid就不会，waitpid 会处理每一个信号。
+   在服务器程序中要检查accept的返回值，因为accept可能会被中断，不是错误，这时我们不应该直接退出，
+   而是继续accept.
+	int s;
+	while((s = accept(sfd, (struct sockaddr *)&cip, &len)) < 0) {
+		if (0 > s && errno != EINTR) {
+			perror("server::accept()");
+			exit(-1);
+		}
+	}

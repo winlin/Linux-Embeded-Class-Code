@@ -1,0 +1,127 @@
+
+内核模块编译问题
+    编写Makefile
+
+
+关于printk
+1. printk和printf异同
+    相同：输出信息
+    不同：
+	a). printf只能在应用程序中使用，printk只能在内核代码中使用
+	b). printk允许根据严重程度，通过附加不同的“优先级”来对消息进行分类。
+2. printk输出信息优先级(按递减顺序)
+    在内核源代码include/linux/kernel.h中定义
+3. printk默认值
+    在内核源代码kernel/prink.c
+	DEFAULT_MESSAGE_LOGLEVEL	4
+    如果不指定printk优先级，将使用默认值
+	MINIUM_CONSOLE_LOGLEVEL		1
+	DEFAULT_CONSOLE_LOGLEVEL	7
+
+
+模块参数
+    1. 模块参数声明
+	module_param(name, type, perm);
+	    name: 模块参数名称
+	    type: 模块参数数据类型
+	    perm: 用户对参数的操作权限
+    2. 常见的几种模块参数数据类型
+	    bool: 布尔型
+	    short: 短整型
+	    int: 整型
+	    long: 长整型
+	    charp: 字符串
+    3. 操作权限：
+	在内核源代码include/linux/stat.h定义
+	    S_IRUSR
+	    S_IWUSR
+	    S_IXUSR
+	    S_IRWXU 用户读、写、执行权限
+
+	    S_IRGRP
+	    S_IWGRP
+	    S_IXGRP
+	    S_IRWXG 同组用户读、写、执行权限
+
+	    S_IROTH
+	    S_IWOTH
+	    S_IXOTH
+	    S_IRWXO 其它用户读、写、执行权限
+
+	    S_IRWXUGO( S_IRWXU | S_IRWXG | S_IRWXO )
+	    S_IALLUGO( S_ISUID | S_ISGID | S_ISVTX | S_IRWXUGO )
+	    S_IRUGO
+	    S_IWUGO
+	    S_IXUGO
+    4. 参数说明
+	MODULE_PARM_DESC(name, description);
+	    name: 要增加描述的模块参数名称
+	    description: 对模块参数的描述
+    5. 参数数组
+	module_param_arry(name, type, length, perm)
+	    name: 模块参数数组名称
+	    type: 模块参数数组数据类型
+	    length: 模块参数数组长度
+	    perm: 用户对参数的操作权限
+    6. 模块参数在文件系统中的位置
+	/sys/module/当前模块名称目录/parameters/
+    7. 模块参数赋值
+	初始化赋值
+	insmod modulename moduleparam=100
+	修改文件内容
+
+
+内存管理
+    1. 地址
+	1.1 物理地址
+	1.2 线性地址(虚拟地址)
+	1.3 逻辑地址
+    2. 地址转换
+    3. 段式内存管理和页式内存管理
+
+
+进程地址空间
+    1. 虚拟内存的好处
+    2. 空间划分
+    3. 内存分配
+	实际的物理内存仅当进程真实访问新获取的虚拟地址时，才会由“请页机制”产生“缺页异常”，从而进入分配内存的程序。
+	缺页异常是虚拟内存机制的基本保证-----由它告诉内核为进程分配物理内存页，并建立页表。这样，虚拟内存才真实地映射了物理内存。
+	3.1 用户空间内存分配
+	    malloc
+	    free
+	3.2 内核空间内存分配
+	    3.2.1 按大小分配
+		kmalloc函数，在内核源代码include/linux/slab_def.h中定义
+		static inline void *kmalloc(size_t size, gfp_t flags);
+		    size: 要分配的大小，按字节计算(typedef unsigned int size_t;)
+		    flags: 分配标志，用于控制kmalloc的行为
+			GFP_KERNEL:标志该次内存分配由内核态进程调用。如果空闲空间不够，该次分配将使得进程进入睡眠，等待空闲页出现。
+			GFP_ATOMIC:用于分配请求来自于中断、任务处理队列、内核定时器等中断上下文的情况，这时候不能进入睡眠。
+			__GFP_DMA:用于分配用于DMA功能的内存区(通常物理地址在16M以下)
+			__GFP_HIGHMEM:用于分配高端内存(896M以上)
+	    3.2.2 按页分配
+		在内核源代码include/linux/gfp.h中定义
+		unsigned long get_zeroed_page(gfp_t flags);
+		    分配一个页面，返回指向新页面的指针，并且将页面内容清零。
+		unsigned __get_free_pages(gfp_t mask, unsigned int order);
+		    分配若干个连续的页面，返回指向该内存区域的指针，不清零这段内存区域。
+	    3.2.3 释放内存
+		对于申请的内存必须释放，否则将导致系统错误。
+		void kfree(const void *);
+		    释放kmalloc申请的内存。
+		#define free_page(addr) free_pages((addr), 0)
+		    释放get_zeroed_page分配的页面
+		void __free_pages(unsigned long addr, unsigned int order)
+		    释放__get_free_pages分配的所有页面。
+
+
+内核地址空间
+    内核空间由内核负责映射，是固定的，不随进程改变。
+
+
+
+
+
+
+
+

@@ -1,0 +1,11 @@
+aaz移植Linux系统中修改内核代码移植于ARM
+	1. 修改根目录中的Makefile中的 ARCH?=(SUBARCH) 以及 CROSS_COMPILE?= 
+	   将其修改为 ARCH=arm  CROSS_COMPILE=arm-linux- . 然后保存.
+	   ----------------------------------------
+	  193  ARCH            ?= arm
+	  194  CROSS_COMPILE   ?= arm-linux-
+	   ----------------------------------------
+	    
+	   或者,在第一次使用 make menuconfig 命令时添加如下参数:
+	      make ARCH=arm CROSS_COMPILE=arm-linux- menuconfig
+	2.

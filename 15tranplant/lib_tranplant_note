@@ -1,0 +1,51 @@
+QT库的移植
+    tslib的移植:
+源码包采用的是auto-make工具来生成Makefile,auto-make会自动按照依赖规则生成特定于系统架构的值,
+然后,生成Makefile用于编译.
+
+ The file `configure.ac' (or `configure.in') is used to create
+`configure' by a program called `autoconf'.  You only need
+`configure.ac' if you want to change it or regenerate `configure' using
+a newer version of `autoconf'.
+
+configure的常用选项:
+--prefix	: 指定安装路径
+--host=HOST     : 指定程序需要运行的CPU架构
+  CC  		: 指定的标准编译器
+  CFLAGS	: 编译选项
+  LDFLAGS	: 连接选项
+---------------
+export CC=arm-linux-gcc
+./configure --prefix=/tmp/install --host=arm-linux
+---------------
+System types:
+  --build=BUILD     configure for building on BUILD [guessed]
+  --host=HOST       cross-compile to build programs to run on HOST [BUILD]
+
+Some influential environment variables:
+  CXX         C++ compiler command
+  CXXFLAGS    C++ compiler flags
+  LDFLAGS     linker flags, e.g. -L<lib dir> if you have libraries in a
+              nonstandard directory <lib dir>
+  CPPFLAGS    C/C++ preprocessor flags, e.g. -I<include dir> if you have
+              headers in a nonstandard directory <include dir>
+  CC          C compiler command
+  CFLAGS      C compiler flags
+  CPP         C preprocessor
+  CXXCPP      C++ preprocessor
+  F77         Fortran 77 compiler command
+  FFLAGS      Fortran 77 compiler flags
+-------------------------------------------------------------------
+我们需要拷贝到板子的文件:
+bin文件夹, etc中的配置文件, lib中的库文件(静态库*.a 和 *.la库说明文件不用拷贝, 只复制动态库和其连接文件),
+ts插件库下面的插件选择性复制(可以放到/usr/lib 和 /lib 下标准路径).
+
+
+pkg-config - Return metainformation about installed libraries
+pkg-config会列出在本地系统中编译某个程序用到的库文件,需要包含那些选项.
+
+========================================
+
+QT库移植
+主要选项:
+./configure -qt-mouse-tslib -no-mouse-qvfb -xplatform qws/linux-arm-g++ -embedded arm

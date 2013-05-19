@@ -1,0 +1,1 @@
+cmd_/home/winlin/myCodes/Embedded/4day/KernelSpaceKmaloc/kernelspacekmalloc.ko := arm-linux-ld -EL -r   -o /home/winlin/myCodes/Embedded/4day/KernelSpaceKmaloc/kernelspacekmalloc.ko /home/winlin/myCodes/Embedded/4day/KernelSpaceKmaloc/kernelspacekmalloc.o /home/winlin/myCodes/Embedded/4day/KernelSpaceKmaloc/kernelspacekmalloc.mod.o

@@ -1,0 +1,380 @@
+1. 块设备驱动的注册与注销
+    include/linux/fs.h
+    block/genhd.c
+    
+int register_blkdev(unsigned int major, const char *name);
+    返回值: 如果major不为0,则成功返回0, 失败返回负值;
+    	    如果major为0, 返回系统自动分配的主设备号.
+
+void unregister_blkdev(unsigned int major, const char *name);
+
+  块设备的次设备对应块设备的分区号.
+
+----------------------------------------
+2. 块设备的数据结构
+include/linux/blkdev.h
+struct block_device_operations {
+	int (*open) (struct block_device *, fmode_t);
+	int (*release) (struct gendisk *, fmode_t);
+	int (*locked_ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
+	int (*ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
+	int (*compat_ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
+	int (*direct_access) (struct block_device *, sector_t,
+						void **, unsigned long *);
+	int (*media_changed) (struct gendisk *);
+	int (*revalidate_disk) (struct gendisk *);
+	int (*getgeo)(struct block_device *, struct hd_geometry *);
+	struct module *owner;
+};
+---------------------------------------- 
+include/linux/fs.h
+struct block_device {
+	dev_t			bd_dev;  /* not a kdev_t - it's a search key */
+	struct inode *		bd_inode;	/* will die */
+	int			bd_openers;
+	struct mutex		bd_mutex;	/* open/close mutex */
+	struct semaphore	bd_mount_sem;
+	struct list_head	bd_inodes;
+	void *			bd_holder;
+	int			bd_holders;
+#ifdef CONFIG_SYSFS
+	struct list_head	bd_holder_list;
+#endif
+	struct block_device *	bd_contains;
+	unsigned		bd_block_size;
+	struct hd_struct *	bd_part;
+	/* number of times partitions within this device have been opened. */
+	unsigned		bd_part_count;
+	int			bd_invalidated;
+	struct gendisk *	bd_disk;
+	struct list_head	bd_list;
+	struct backing_dev_info *bd_inode_backing_dev_info;
+	/*
+	 * Private data.  You must have bd_claim'ed the block_device
+	 * to use this.  NOTE:  bd_claim allows an owner to claim
+	 * the same device multiple times, the owner must take special
+	 * care to not mess up bd_private for that case.
+	 */
+	unsigned long		bd_private;
+};  
+----------------------------------------
+include/linux/genhd.h
+struct gendisk {
+	/* major, first_minor and minors are input parameters only,
+	 * don't use directly.  Use disk_devt() and disk_max_parts().
+	 */
+	int major;			/* major number of driver */
+	int first_minor;
+	int minors;                     /* maximum number of minors, =1 for
+                                         * disks that can't be partitioned. */
+
+	char disk_name[DISK_NAME_LEN];	/* name of major driver */
+
+	/* Array of pointers to partitions indexed by partno.
+	 * Protected with matching bdev lock but stat and other
+	 * non-critical accesses use RCU.  Always access through
+	 * helpers.
+	 */
+	struct disk_part_tbl *part_tbl;   硬盘分区表
+	struct hd_struct part0;           第一个分区
+
+	struct block_device_operations *fops;  块设备操作的集合
+	struct request_queue *queue;       请求队列
+	void *private_data;              私有数据
+
+	int flags;
+	struct device *driverfs_dev;  // FIXME: remove
+	struct kobject *slave_dir;
+
+	struct timer_rand_state *random;
+
+	atomic_t sync_io;		/* RAID */
+	struct work_struct async_notify;
+#ifdef  CONFIG_BLK_DEV_INTEGRITY
+	struct blk_integrity *integrity;
+#endif
+	int node_id;
+};
+
+include/linux/genhd.h
+struct disk_part_tbl {
+	struct rcu_head rcu_head;
+	int len;
+	struct hd_struct *part[];
+};
+----------------------------------------
+include/linux/blkdev.h
+/*
+ * try to put the fields that are referenced together in the same cacheline.
+ * if you modify this structure, be sure to check block/blk-core.c:rq_init()
+ * as well!
+ */
+struct request {
+	struct list_head queuelist;    请求队列链表
+	struct call_single_data csd;
+	int cpu;
+
+	struct request_queue *q;  该请求所属的请求队列
+
+	unsigned int cmd_flags;
+	enum rq_cmd_type_bits cmd_type;
+	unsigned long atomic_flags;
+
+	/* Maintain bio traversal state for part by part I/O submission.
+	 * hard_* are block layer internals, no driver should touch them!
+	 */
+
+	sector_t sector;		/* next sector to submit */ 待传输的下一个扇区
+	sector_t hard_sector;		/* next sector to complete */ 待完成的下一个扇区
+	unsigned long nr_sectors;	/* no. of sectors left to submit */待传输的扇区数
+	unsigned long hard_nr_sectors;	/* no. of sectors left to complete */待完成的扇区数
+	/* no. of sectors left to submit in the current segment */
+	unsigned int current_nr_sectors; 当前I/O操作中待传输的扇区数
+
+	/* no. of sectors left to complete in the current segment */
+	unsigned int hard_cur_sectors; 当前I/O操作中待完成的扇区数
+
+	struct bio *bio; 请求的bio结构体指针
+	struct bio *biotail; 请求的bio结构体指针(尾部)
+
+	struct hlist_node hash;	/* merge hash */
+	/*
+	 * The rb_node is only used inside the io scheduler, requests
+	 * are pruned when moved to the dispatch queue. So let the
+	 * completion_data share space with the rb_node.
+	 */
+	union {
+		struct rb_node rb_node;	/* sort/lookup */
+		void *completion_data;
+	};
+
+	/*
+	 * two pointers are available for the IO schedulers, if they need
+	 * more they have to dynamically allocate it.
+	 */
+	void *elevator_private;
+	void *elevator_private2;
+
+	struct gendisk *rq_disk;
+	unsigned long start_time;
+
+	/* Number of scatter-gather DMA addr+len pairs after
+	 * physical address coalescing is performed.
+	 */
+	unsigned short nr_phys_segments; 请求在物理内存中占据的不连续的段的数量
+
+	unsigned short ioprio;
+
+	void *special;
+	char *buffer; 传输数据缓冲区指针(内核虚拟地址)
+
+	int tag;
+	int errors;
+
+	int ref_count;  请求引用计数
+
+	/*
+	 * when request is used as a packet command carrier
+	 */
+	unsigned short cmd_len;
+	unsigned char __cmd[BLK_MAX_CDB];
+	unsigned char *cmd;
+
+	unsigned int data_len;
+	unsigned int extra_len;	/* length of alignment and padding */
+	unsigned int sense_len;
+	void *data;
+	void *sense;
+
+	unsigned long deadline;
+	struct list_head timeout_list;
+	unsigned int timeout;
+	int retries;
+
+	/*
+	 * completion callback.
+	 */
+	rq_end_io_fn *end_io;
+	void *end_io_data;
+
+	/* for bidi */
+	struct request *next_rq;
+};
+
+----------------------------------------
+include/linux/bio.h
+/*
+ * main unit of I/O for the block layer and lower layers (ie drivers and
+ * stacking drivers)
+ */
+struct bio {
+	sector_t		bi_sector;	/* device address in 512 byte
+						   sectors */ 该bio要操作的起始扇区
+	struct bio		*bi_next;	/* request queue link */
+	struct block_device	*bi_bdev;
+	unsigned long		bi_flags;	/* status, command, etc */描述bio的标志,最低位为读写标志,
+		 				被置位表示写请求. 可以使用bio_data_dir(bio)宏来获取读写方向
+	unsigned long		bi_rw;		/* bottom bits READ/WRITE,
+						 * top bits priority
+						 */
+
+	unsigned short		bi_vcnt;	/* how many bio_vec's */
+	unsigned short		bi_idx;		/* current index into bvl_vec */
+
+	/* Number of segments in this BIO after
+	 * physical address coalescing is performed.
+	 */
+	unsigned int		bi_phys_segments;  该bio操作的物理段的数目
+
+	unsigned int		bi_size;	/* residual I/O count */被传输数据的大小B,可以通过
+		 				bio_sectors(bio)来获取以扇区为单位的大小
+
+	/*
+	 * To keep track of the max segment size, we account for the
+	 * sizes of the first and last mergeable segments in this bio.
+	 */
+	unsigned int		bi_seg_front_size;
+	unsigned int		bi_seg_back_size;
+
+	unsigned int		bi_max_vecs;	/* max bvl_vecs we can hold */
+
+	unsigned int		bi_comp_cpu;	/* completion CPU */
+
+	struct bio_vec		*bi_io_vec;	/* the actual vec list */该bio处理的真实的向量
+
+	bio_end_io_t		*bi_end_io;
+	atomic_t		bi_cnt;		/* pin count */
+
+	void			*bi_private;
+#if defined(CONFIG_BLK_DEV_INTEGRITY)
+	struct bio_integrity_payload *bi_integrity;  /* data integrity */
+#endif
+
+	bio_destructor_t	*bi_destructor;	/* destructor */
+};
+
+----------------------------------------
+bio_vec
+  include/linux/bio.h
+/*
+ * was unsigned short, but we might as well be ready for > 64kB I/O pages
+ */
+struct bio_vec {
+	struct page	*bv_page;  当前bio的页指针
+	unsigned int	bv_len;   当前要传输的字节数
+	unsigned int	bv_offset; 偏移地址
+};
+
+----------------------------------------
+include/linux/blkdev.h
+request_queue
+
+
+----------------------------------------
+include/linux/hdreg.h
+
+struct hd_geometry {
+      unsigned char heads;  磁头数量
+      unsigned char sectors; 扇区
+      unsigned short cylinders; 柱面
+      unsigned long start;
+};
+这个结构体可以用于计算磁盘容量. 
+
+================================================================================
+1. genddisk操作
+   include/linux/genhd.h
+   block/genhd.c
+   
+   del_gendisk() 在fs/partitions/check.c中实现
+
+分配一个gendisk对象:
+struct gendisk *alloc_disk(int minors);
+       minors:该设备使用的次设备的数目,一般就是指分区数目. 改值设定后不能修改.
+
+添加磁盘:
+add_disk()把我们的磁盘注册到内核中:
+void add_disk(struct gendisk *disk);
+      一定要在我们的磁盘都已经准备好了,才进行add_disk()操作.
+
+删除磁盘:
+void del_gendisk(struct gendisk *gp);
+
+设置获得磁盘容量:
+static inline sector_t get_capacity(struct gendisk *disk)
+{
+	return disk->part0.nr_sects;  返回值:磁盘容量,实际是扇区数
+}
+static inline void set_capacity(struct gendisk *disk, sector_t size)
+{
+	disk->part0.nr_sects = size;
+}
+
+设置引用计数:
+struct kobject *get_disk(struct gendisk *disk);
+void put_disk(struct gendisk *disk);
+   这两个操作用来操作引用计数, 驱动应该是从来不需要调用它们的.
+   实际上,通常对于del_gendisk操作的调用会去掉最后一个gendisk的引用, 但是不保证这样.
+
+----------------------------------------
+bio操作宏和函数:
+
+
+----------------------------------------
+request_queue操作:
+ include/linux/blkdev.h
+ block/blk-core.c elevator.c blk-settings.c 
+ 
+  内核源代码block目录下包含电梯调度算法相关队列处理函数.
+
+/**
+ * blk_init_queue  - prepare a request queue for use with a block device
+ * @rfn:  The function to be called to process requests that have been
+ *        placed on the queue.
+ * @lock: Request queue spin lock
+ *
+ * Description:
+ *    If a block device wishes to use the standard request handling procedures,
+ *    which sorts requests and coalesces adjacent requests, then it must
+ *    call blk_init_queue().  The function @rfn will be called when there
+ *    are requests on the queue that need to be processed.  If the device
+ *    supports plugging, then @rfn may not be called immediately when requests
+ *    are available on the queue, but may be called at some time later instead.
+ *    Plugged queues are generally unplugged when a buffer belonging to one
+ *    of the requests on the queue is needed, or due to memory pressure.
+ *
+ *    @rfn is not required, or even expected, to remove all requests off the
+ *    queue, but only as many as it can handle at a time.  If it does leave
+ *    requests on the queue, it is responsible for arranging that the requests
+ *    get dealt with eventually.
+ *
+ *    The queue spin lock must be held while manipulating the requests on the
+ *    request queue; this lock will be taken also from interrupt context, so irq
+ *    disabling is needed for it.
+ *
+ *    Function returns a pointer to the initialized request queue, or %NULL if
+ *    it didn't succeed.
+ *
+ * Note:
+ *    blk_init_queue() must be paired with a blk_cleanup_queue() call
+ *    when the block device is deactivated (such as at module unload).
+ **/
+创建并且初始化一个请求队列:
+struct request_queue *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
+   rfn: 队列请求处理函数
+   lock: 保护队列操作的锁
+
+void blk_cleanup_queue(struct request_queue *q)
+
+分配一个请求队列:
+它对应于Flash, RAM Disk等完全随机访问的非机械设备, 并不需要复杂的I/O调度. 此时, 可以使用该函数分配
+一个请求队列, 并使用后面的blk_queue_make_request()函数来绑定请求队列和"制造请求"的函数.
+struct request_queue *blk_alloc_queue(gfp_t gfp_mask)
+       gfp_mask: 分配请求队列结构体内存空间的内核内存分配标志.
+
+绑定请求队列和"制造"请求函数:
+void blk_queue_make_request(struct request_queue *q, mak_request_fn *mfn)
+
+使用电梯调度算法提取队列中的下一个请求:
+struct request *elv_next_request(struct request_queue *q);
+

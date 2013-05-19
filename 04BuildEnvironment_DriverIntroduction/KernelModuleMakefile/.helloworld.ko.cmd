@@ -1,0 +1,1 @@
+cmd_/home/winlin/myCodes/Embedded/4day/KernelModuleMakefile/helloworld.ko := arm-linux-ld -EL -r   -o /home/winlin/myCodes/Embedded/4day/KernelModuleMakefile/helloworld.ko /home/winlin/myCodes/Embedded/4day/KernelModuleMakefile/helloworld.o /home/winlin/myCodes/Embedded/4day/KernelModuleMakefile/helloworld.mod.o

@@ -1,0 +1,1 @@
+cmd_/home/winlin/myCodes/Embedded/4day/PrintkAllLevel/printkalllevel.ko := arm-linux-ld -EL -r   -o /home/winlin/myCodes/Embedded/4day/PrintkAllLevel/printkalllevel.ko /home/winlin/myCodes/Embedded/4day/PrintkAllLevel/printkalllevel.o /home/winlin/myCodes/Embedded/4day/PrintkAllLevel/printkalllevel.mod.o

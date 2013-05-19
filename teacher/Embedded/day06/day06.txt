@@ -1,0 +1,127 @@
+Linux驱动学习
+    1. 驱动概念
+    2. 知识结构
+    3. 学习方法
+    4. Linux系统驱动分类
+	4.1 字符设备驱动
+	4.2 块设备驱动
+	4.3 网络设备驱动
+    5. 应用程序与驱动的交互 
+
+
+
+字符设备驱动
+    1. 设备号
+	在内核源代码Documentation/devices.txt
+	该文件列出本发行包中已经被使用和可以使用的主设备号
+    2. 系统当前占用设备号
+	/dev
+	/proc/devices
+    3. 设备号的作用
+	主设备号：用于标识设备类型，对应设备文件和设备驱动
+	次设备号：用于标识同类型的不同设备个体，驱动程序依据该号码辨别具体操作的是哪个设备
+    4. 设备号的处理
+	dev_t数据类型用于定义设备号，它本质上是一个unsigned int,高12位是主设备号，低20位是次设备号
+	在内核源代码include/linux/kdev_t.h中定义
+	4.1 提取主设备号
+	    MAJOR(dev_t dev);
+	4.2 提取次设备号
+	    MINOR(dev_t dev);
+	4.3 合成设备号
+	    MKDEV(dev_t major, dev_t minor);
+    5. 设备号分配方法
+	5.1 静态分配
+	    在内核源代码Documentation/devices.txt中寻找可用的主设备号
+	5.2 动态分配
+	    在驱动模块加载时临时向内核申请主设备号
+    6. 设备号的注册和注销
+	在内核源代码fs/char_dev.c中实现
+	6.1 使用静态主设备号注册
+	    int register_chrdev_region(dev_t from, unsigned count, const char *name);
+		from:待申请的起始设备号
+		count:待申请的设备号数目
+		name:待申请的设备名称(/proc/devices)
+		返回值：成功返回0，失败返回负值
+	    申请从from开始的count个设备号
+	6.2 使用动态申请主设备号注册
+	    int alloc_chrdev_region(dev_t *dev, unsigned baseminor, unsigned count, const char *name);
+		dev:返回分配到的主设备号
+		baseminor:希望分配到的主设备号的起始次设备号
+		count:需要分配的设备号的数目
+		name:设备名称(/proc/devices)
+		返回值：成功返回0，失败返回负值
+	6.3 设备号注销
+	    不论使用何种方法使用设备号，都应该在不再使用的时候释放这些设备号。
+	    void unregister_chrdev_region(dev_t from, unsigned count);
+		from:待注销的起始主设备号
+		count:待注销的设备号数目
+
+设备文件(设备节点)
+    1. 手动创建
+	mknod filename type major minor
+	    filename: 待创建的设备文件名称
+	    type: 待创建的设备类型，通常为c或b
+	    major:待创建设备文件的对应设备的主设备号
+	    minor:待创建设备文件的对应设备的次设备号
+	例如：mknod /dev/firstchardevdriver c 240 0
+    2. 脚本创建
+	使用一个简单的脚本替代insmod命令来获取内核分配的主设备号，再使用动态获取的主设备号来创建设备文件。
+    3. 驱动创建
+	需要有udev的支持，对于嵌入式常用busybox自带的mdev。
+
+
+数据结构
+    1. struct file
+	在内核源代码include/linux/fs.h中定义
+	struct file {
+	    ...
+	    loff_t f_pos; // 当前文件操作位置
+	    struct file_operations *f_op; // 文件对应的操作
+	    unsigned int f_flags; // 文件标志
+	    void *private_data; // 文件私有数据
+	    ...
+	};
+    2. struct inode
+	用于记录文件物理信息，不同于struct file.
+	一个文件可以对应多个file结构，但是只有一个inode结构。
+	在内核源代码include/linux/fs.h中定义
+	struct inode {
+	    ...
+	    dev_t i_rdev; // 设备号
+	    ...
+	};
+    3. struct file_operations
+	在内核源代码include/linux/fs.h中定义
+	它实际上是一个函数指针的集合，这些函数定义了能够对设备进行的操作。
+	这些指针指向驱动中的函数，每个函数完成一个特定的操作，不支持的操作指针留空。
+
+
+字符设备驱动注册
+    struct cdev 在内核源代码include/linux/cdev.h中定义
+    1. 分配一个cdev对象
+	struct cdev *cdev_alloc(void);
+	    返回值：返回内核分配的cdev对象指针
+    2. 初始化一个cdev对象
+	void cdev_init(struct cdev *cdev, const struct file_operations *fops);
+	    cdev:待初始化的cdev对象指针
+	    fops:设备对应的操作函数集
+    3. 向内核添加cdev对象
+	int cdev_add(struct cdev *cdev, dev_t dev, unsigned count);
+	    cdev:待添加到内核的cdev对象指针
+	    dev:待添加到内核的设备的设备号
+	    count:待添加的设备个数
+	    返回值：成功返回0，失败返回负值
+    4. 从内核注销cdev对象
+	void cdev_del(struct cdev *cdev);
+	    cdev:待从内核注销的cdev对象指针
+
+
+
+
+
+
+
+
+
+
+

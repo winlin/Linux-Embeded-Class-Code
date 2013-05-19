@@ -1,0 +1,69 @@
+嵌入式Linux设备驱动
+
+
+认识板子软硬件组成部分
+
+
+搭建环境
+PC配置：
+tftp服务
+rpm -qa | grep "tftp"
+tftp 127.0.01
+/opt/tftpboot
+
+nfs服务
+rpm -qa | grep "nfs"
+chkconfig --list
+cat /etc/exports
+共享目录 允许访问的主机(访问权限,同步方式,root用户权限)
+/opt/nfsroot *(rw,sync,no_root_squash)
+setup
+/etc/init.d/nfs [start|stop|restart]
+mkdir -p /mnt/testnfs
+mount -t nfs 192.168.180.100:/opt/nfsroot /mnt/testnfs 
+umount /mnt/testnfs 卸载挂载点
+System->Administration->Server Settings->nfs
+System->Administration->Server Settings->Services
+
+
+烧录软件系统
+1. 从SD卡启动到u-boot
+2. 清空nandflash
+	nand erase 0
+3. 写入nandflash u-boot
+	nand erase 0 40000
+	printenv
+	setenv serverip 你的主机ip地址
+	tftpboot c0008000 u-boot.bin
+	nand write c0008000 0 40000
+4. 重新配置系统启动方式到nandflash u-boot
+	setenv serverip 你的主机ip地址
+	saveen
+5. 烧录kernel
+	nand erase 40000 300000
+	tftpboot c0008000 zImage
+	nand write c0008000 40000 300000
+	reset
+6. 烧录cramfs(最小文件系统)
+	nand erase 400000 400000
+	tftpboot c0008000 root_mkfs.cramfs
+	nand write c0008000 400000 400000
+	setenv bootargs noinitrd root=/dev/mtdblock0 console=ttySAC0 init=/linuxrc
+	saveenv
+	reset
+7. 烧录ubifs(真实文件系统)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
